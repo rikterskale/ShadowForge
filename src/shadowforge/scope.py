@@ -20,16 +20,22 @@ class EngagementScope:
     @classmethod
     def from_file(cls, path: str | Path) -> EngagementScope:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or not isinstance(data.get("name"), str):
-            raise ScopeError("scope file must contain a string 'name'")
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("name"), str)
+            or not data["name"].strip()
+        ):
+            raise ScopeError("scope file must contain a non-empty string 'name'")
         raw_targets = data.get("targets")
         if not isinstance(raw_targets, list) or not raw_targets:
             raise ScopeError("scope file must contain a non-empty 'targets' list")
+        if any(not isinstance(item, str) or not item.strip() for item in raw_targets):
+            raise ScopeError("every scope target must be a non-empty IP/CIDR string")
         try:
             networks = tuple(ipaddress.ip_network(item, strict=False) for item in raw_targets)
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             raise ScopeError(f"invalid target in scope file: {exc}") from exc
-        return cls(name=data["name"], networks=networks)
+        return cls(name=data["name"].strip(), networks=networks)
 
     def contains(self, target: str) -> bool:
         try:
