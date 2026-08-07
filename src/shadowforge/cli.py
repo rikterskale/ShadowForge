@@ -13,6 +13,7 @@ from shadowforge.model_router import ModelRouter
 from shadowforge.models import ModelError
 from shadowforge.recon import ReconCoordinator, ReconDecisionError
 from shadowforge.scope import EngagementScope, ScopeError
+from shadowforge.state import EngagementStateStore, StateError
 from shadowforge.tools.base import ToolRegistry
 from shadowforge.tools.http import HttpMetadataTool
 from shadowforge.tools.nmap import NmapTool
@@ -60,6 +61,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         help="Maximum planner/execution steps, from 1 through 5 (default: 3)",
+    )
+    recon.add_argument(
+        "--session",
+        help="Optional persistent session ID for resumable engagement state",
+    )
+    recon.add_argument(
+        "--state-dir",
+        default="artifacts/state",
+        help="Directory for persistent recon session state (default: artifacts/state)",
     )
     recon.add_argument(
         "--execute",
@@ -141,7 +151,14 @@ def _run_recon(args: argparse.Namespace) -> int:
         return 2
     try:
         scope, harness = _build_harness(args)
-        coordinator = ReconCoordinator(scope=scope, harness=harness, router=ModelRouter())
+        state_store = EngagementStateStore(args.state_dir) if args.session else None
+        coordinator = ReconCoordinator(
+            scope=scope,
+            harness=harness,
+            router=ModelRouter(),
+            state_store=state_store,
+            session_id=args.session,
+        )
         run = coordinator.run(
             objective=args.objective,
             target=args.target,
@@ -151,6 +168,7 @@ def _run_recon(args: argparse.Namespace) -> int:
     except (
         ScopeError,
         ReconDecisionError,
+        StateError,
         ValueError,
         KeyError,
         EvidenceError,
@@ -166,7 +184,10 @@ def _run_recon(args: argparse.Namespace) -> int:
         "mode": "execute" if args.execute else "dry-run",
         "steps": [step.as_dict() for step in run.steps],
         "budget_exhausted": run.budget_exhausted,
+        "prior_observation_count": run.prior_observation_count,
     }
+    if run.session_id is not None:
+        payload["session"] = run.session_id
     if run.summary is not None:
         payload["summary"] = run.summary
     if run.critique is not None:
