@@ -1,6 +1,7 @@
 import json
 from unittest.mock import patch
 
+from shadowforge.agent import ActionProposal, AgentRun, ProposalError
 from shadowforge.cli import main
 from shadowforge.evidence import EvidenceError
 from shadowforge.model_router import ModelStatus
@@ -96,3 +97,111 @@ def test_cli_models_reports_missing_primary(capsys):
         code = main(["models"])
     assert code == 2
     assert "Model error" in capsys.readouterr().out
+
+
+def sample_run(*, executed=False, status="ok"):
+    proposal = ActionProposal(
+        "nmap_service_scan",
+        "192.0.2.10",
+        {"ports": "22,80,443"},
+        "Identify common services.",
+    )
+    if not executed:
+        return AgentRun(proposal, None, None)
+    return AgentRun(proposal, ToolResult(status, {"services": []}), "Looks sufficient.")
+
+
+def test_cli_agent_requires_scope(capsys):
+    code = main(["agent", "Find services", "--target", "192.0.2.10"])
+    assert code == 2
+    assert "agent mode requires --scope" in capsys.readouterr().out
+
+
+def test_cli_agent_dry_run_does_not_require_authorized(tmp_path, capsys):
+    with patch("shadowforge.cli.AgentCoordinator.run", return_value=sample_run()):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+            ]
+        )
+    output = capsys.readouterr().out
+    assert code == 0
+    assert '"mode": "dry-run"' in output
+    assert '"proposal"' in output
+
+
+def test_cli_agent_execute_requires_authorized(tmp_path, capsys):
+    code = main(
+        [
+            "--scope",
+            str(scope_file(tmp_path)),
+            "agent",
+            "Find services",
+            "--target",
+            "192.0.2.10",
+            "--execute",
+        ]
+    )
+    assert code == 2
+    assert "Refusing to execute" in capsys.readouterr().out
+
+
+def test_cli_agent_execute_prints_result_and_critique(tmp_path, capsys):
+    with patch("shadowforge.cli.AgentCoordinator.run", return_value=sample_run(executed=True)):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "--authorized",
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+                "--execute",
+            ]
+        )
+    output = capsys.readouterr().out
+    assert code == 0
+    assert '"mode": "execute"' in output
+    assert '"critique": "Looks sufficient."' in output
+
+
+def test_cli_agent_reports_policy_and_model_errors(tmp_path, capsys):
+    with patch(
+        "shadowforge.cli.AgentCoordinator.run",
+        side_effect=ProposalError("bad proposal"),
+    ):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+            ]
+        )
+    assert code == 2
+    assert "bad proposal" in capsys.readouterr().out
+
+    with patch(
+        "shadowforge.cli.AgentCoordinator.run",
+        side_effect=ModelError("offline"),
+    ):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+            ]
+        )
+    assert code == 2
+    assert "offline" in capsys.readouterr().out
