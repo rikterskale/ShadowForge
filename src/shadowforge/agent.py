@@ -59,7 +59,12 @@ class ActionProposal:
             raise ProposalError("proposal rationale must be a non-empty string")
         if len(rationale) > 1000:
             raise ProposalError("proposal rationale must be 1000 characters or fewer")
-        return cls(tool=tool, target=target, arguments={"ports": ports}, rationale=rationale.strip())
+        return cls(
+            tool=tool,
+            target=target,
+            arguments={"ports": ports},
+            rationale=rationale.strip(),
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
