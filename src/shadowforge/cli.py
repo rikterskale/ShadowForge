@@ -105,6 +105,8 @@ def _run_agent(args: argparse.Namespace) -> int:
         payload["result"] = {"status": run.result.status, **run.result.data}
     if run.critique is not None:
         payload["critique"] = run.critique
+    if run.critique_error is not None:
+        payload["critique_error"] = run.critique_error
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if run.result is None or run.result.status == "ok" else 1
 
