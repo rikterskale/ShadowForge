@@ -18,7 +18,7 @@ class EngagementScope:
     networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "EngagementScope":
+    def from_file(cls, path: str | Path) -> EngagementScope:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("name"), str):
             raise ScopeError("scope file must contain a string 'name'")
