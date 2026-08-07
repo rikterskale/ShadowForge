@@ -1,17 +1,30 @@
-import subprocess
 from unittest.mock import patch
+import subprocess
 
 import pytest
 
 from shadowforge.tools.nmap import NmapTool
 
-
-XML = """<?xml version='1.0'?><nmaprun><host><ports><port protocol='tcp' portid='80'><state state='open'/><service name='http' product='nginx' version='1.2'/></port><port protocol='tcp' portid='81'><state state='closed'/></port></ports></host></nmaprun>"""
+XML = (
+    "<?xml version='1.0'?><nmaprun><host><ports>"
+    "<port protocol='tcp' portid='80'><state state='open'/>"
+    "<service name='http' product='nginx' version='1.2'/></port>"
+    "<port protocol='tcp' portid='81'><state state='closed'/></port>"
+    "</ports></host></nmaprun>"
+)
 
 
 def test_nmap_command_is_constrained():
     assert NmapTool.build_command("192.0.2.1", {"ports": "22,80-81"}) == [
-        "nmap", "-sT", "-sV", "--version-light", "-p", "22,80-81", "-oX", "-", "192.0.2.1"
+        "nmap",
+        "-sT",
+        "-sV",
+        "--version-light",
+        "-p",
+        "22,80-81",
+        "-oX",
+        "-",
+        "192.0.2.1",
     ]
     with pytest.raises(ValueError):
         NmapTool.build_command("192.0.2.1", {"ports": "80 --script vuln"})
@@ -30,7 +43,13 @@ def test_nmap_parses_services():
     ):
         result = NmapTool().run("192.0.2.1", {})
     assert result.data["services"] == [
-        {"port": 80, "protocol": "tcp", "service": "http", "product": "nginx", "version": "1.2"}
+        {
+            "port": 80,
+            "protocol": "tcp",
+            "service": "http",
+            "product": "nginx",
+            "version": "1.2",
+        }
     ]
 
 
