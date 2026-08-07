@@ -250,3 +250,19 @@ def test_cli_agent_reports_policy_and_model_errors(tmp_path, capsys):
         )
     assert code == 2
     assert "offline" in capsys.readouterr().out
+
+
+def test_cli_agent_reports_file_system_errors(tmp_path, capsys):
+    with patch("shadowforge.cli.AgentCoordinator.run", side_effect=OSError("disk unavailable")):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+            ]
+        )
+    assert code == 2
+    assert "File/system error: disk unavailable" in capsys.readouterr().out
