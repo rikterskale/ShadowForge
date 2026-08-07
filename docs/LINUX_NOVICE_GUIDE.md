@@ -1,6 +1,8 @@
 # ShadowForge Linux Novice Guide
 
-Use ShadowForge only on systems you have written permission to test. Commands below are for Debian/Ubuntu/Kali-style systems.
+Use ShadowForge only on systems you have written permission to test. This guide is for Debian/Ubuntu-style Linux systems.
+
+> **Kali Linux users:** use `docs/KALI_NOVICE_GUIDE.md`. Kali has additional system-Python protections and is validated separately in CI using the official Kali rolling container.
 
 ## 1. Open Terminal
 Open your system's Terminal application.
