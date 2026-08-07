@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 
 from shadowforge.models import ModelError, OpenAICompatibleProvider
 from shadowforge.ollama import OllamaDiscovery
 
-DEFAULT_MODELS: Mapping[str, str] = {
+DEFAULT_MODELS: dict[str, str] = {
     "primary": "qwen3.5:27b",
     "critic": "gemma4:31b",
     "coding": "devstral-small-2:24b",
@@ -23,6 +21,7 @@ class ModelStatus:
     preferred_model: str
     active_model: str
     fallback: bool
+    fallback_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -51,12 +50,18 @@ class ModelRouter:
         statuses: list[ModelStatus] = []
         for role, preferred in DEFAULT_MODELS.items():
             active = preferred if preferred in available else primary
+            fallback = active != preferred
             statuses.append(
                 ModelStatus(
                     role=role,
                     preferred_model=preferred,
                     active_model=active,
-                    fallback=active != preferred,
+                    fallback=fallback,
+                    fallback_reason=(
+                        f"{preferred} is not installed; using required primary model {primary}"
+                        if fallback
+                        else None
+                    ),
                 )
             )
         return tuple(statuses)
@@ -79,7 +84,3 @@ class ModelRouter:
     @staticmethod
     def roles() -> tuple[str, ...]:
         return tuple(DEFAULT_MODELS)
-
-    @staticmethod
-    def config_path() -> Path:
-        return Path("config/models.yaml")
