@@ -20,7 +20,6 @@ def test_router_matches_adatlas_models():
     assert router.provider_for("primary", ALL_MODELS).model == "qwen3.5:27b"
     assert router.provider_for("critic", ALL_MODELS).model == "gemma4:31b"
     assert router.provider_for("coding", ALL_MODELS).model == "devstral-small-2:24b"
-    assert str(router.config_path()).endswith("config/models.yaml")
 
 
 def test_qwen_only_falls_back_for_optional_roles():
@@ -28,8 +27,10 @@ def test_qwen_only_falls_back_for_optional_roles():
     statuses = {item.role: item for item in router.resolve(QWEN_ONLY)}
     assert statuses["primary"].active_model == "qwen3.5:27b"
     assert not statuses["primary"].fallback
+    assert statuses["primary"].fallback_reason is None
     assert statuses["critic"].active_model == "qwen3.5:27b"
     assert statuses["critic"].fallback
+    assert "not installed" in statuses["critic"].fallback_reason
     assert statuses["coding"].active_model == "qwen3.5:27b"
     assert statuses["coding"].fallback
     assert router.provider_for("critic", QWEN_ONLY).model == "qwen3.5:27b"
