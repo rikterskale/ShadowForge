@@ -45,10 +45,7 @@ class EvidenceStore:
         if not self.path.exists() or self.path.stat().st_size == 0:
             return 0
         expected_previous: str | None = None
-        try:
-            lines = self.path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            raise
+        lines = self.path.read_text(encoding="utf-8").splitlines()
         for index, line in enumerate(lines, start=1):
             try:
                 record = json.loads(line)
