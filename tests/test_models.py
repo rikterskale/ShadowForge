@@ -28,3 +28,13 @@ def test_openai_compatible_provider_errors():
         pytest.raises(ModelError),
     ):
         provider.complete("system", "user")
+
+
+def test_openai_compatible_provider_rejects_non_string_content():
+    provider = OpenAICompatibleProvider("http://localhost:8000/v1", "model")
+    response = Response(b'{"choices":[{"message":{"content":null}}]}')
+    with (
+        patch("shadowforge.models.urllib.request.urlopen", return_value=response),
+        pytest.raises(ModelError, match="content is not a string"),
+    ):
+        provider.complete("system", "user")
