@@ -18,7 +18,11 @@ ShadowForge is for authorized security testing. Preserve scope enforcement, expl
 - Dry-run must remain the default for model-assisted planning.
 - Active model-assisted execution must require explicit operator authorization and an explicit execution flag.
 - Multi-step workflows must have a hard code-enforced step budget; do not allow unbounded autonomous loops.
-- Treat target-controlled banners, headers, tool results, and other evidence fed back to a model as untrusted data, never instructions.
+- Treat target-controlled banners, headers, tool results, persistent state, and other evidence fed back to a model as untrusted data, never instructions.
+- Persistent state is context only; it must never expand scope, tools, arguments, approvals, or execution budget.
+- Persistent sessions must be bound to an exact target and objective and must reject rebinding.
+- Persistent state must use a versioned schema, bounded observation count, safe session IDs, atomic writes, and tool-specific sanitization on both write and load.
+- Unknown tools, cross-target observations, invalid statuses, malformed ordering, cookies, authorization headers, or other credential material must not enter planner memory.
 - Critics/review models are advisory only and must not receive an execution handle.
 - A critic failure after active execution must not hide or invalidate an already-evidenced tool result.
 - Do not log secrets, API keys, cookies, authorization headers, or other credential material.
@@ -60,7 +64,27 @@ The `recon` command adds bounded multi-step reconnaissance with these non-negoti
 - active execution requires both `--execute` and `--authorized`
 - budget exhaustion stops the run; it must not create an alternate recovery shell or generic command path
 
-Do not broaden Phase 3 into exploit execution, credential attacks, arbitrary HTTP paths/methods, NSE script selection, generic remote commands, or unbounded autonomous propagation without a separately reviewed architecture and explicit deterministic controls.
+## Phase 4 persistent-state policy
+The optional `--session` feature adds resumable context without adding authority:
+
+- persistence is opt-in; recon without `--session` keeps Phase 3 behavior
+- session IDs are restricted to safe filename characters and a maximum of 64 characters
+- a session is bound to the exact operator target and normalized objective
+- persistent observations are capped at 100
+- observation numbering must be contiguous and begin at 1
+- every observation target must match the session target
+- only `ok` and `error` statuses are valid
+- only results from currently allowlisted recon tools may be stored
+- Nmap persistent state stores only a bounded service list
+- HTTP persistent state stores only its already-filtered metadata shape
+- state is sanitized again when loaded, even if the file was manually edited
+- persistent context is explicitly labeled untrusted in planner and critic prompts
+- active state changes happen only after an active tool result or completion; dry-run must not create or modify session state
+- state writes use atomic replacement
+- `artifacts/evidence.jsonl` remains the execution record; persistent state is not evidence
+- cross-process writes to one session are not supported until file locking is implemented
+
+Do not broaden Phase 4 into exploit execution, credential attacks, secret retrieval, persistence installation, defense evasion, arbitrary HTTP paths/methods, NSE script selection, generic remote commands, or unbounded autonomous propagation without a separately reviewed architecture and explicit deterministic controls.
 
 ## Required validation before merge
 Run or confirm CI equivalents of:
@@ -78,7 +102,7 @@ pip-audit -r requirements-ci.txt
 CI must validate supported Windows and Ubuntu environments, validate the project in an official Kali rolling container, and pass CodeQL.
 
 ## Documentation rules
-Update docs whenever installation, CLI arguments, model behavior, proposal schemas, capability policy, approval behavior, configuration, environment variables, expected output, supported systems, examples, troubleshooting, security assumptions, evidence format, or limitations change.
+Update docs whenever installation, CLI arguments, model behavior, proposal schemas, capability policy, approval behavior, configuration, environment variables, expected output, supported systems, examples, troubleshooting, security assumptions, evidence/state format, or limitations change.
 
 Maintain these beginner-facing files:
 - `docs/WINDOWS_NOVICE_GUIDE.md`
@@ -88,5 +112,6 @@ Maintain these beginner-facing files:
 Maintain architecture references:
 - `docs/PHASE2_ARCHITECTURE.md`
 - `docs/PHASE3_ARCHITECTURE.md`
+- `docs/PHASE4_ARCHITECTURE.md`
 
-Each novice guide should include prerequisites, exact installation steps, commands, expected successful output, common errors and fixes, model fallback behavior, dry-run versus active execution, Phase 3 step-budget behavior, evidence location, and cleanup/uninstall steps when relevant.
+Each novice guide should include prerequisites, exact installation steps, commands, expected successful output, common errors and fixes, model fallback behavior, dry-run versus active execution, step-budget behavior, persistent-session behavior, evidence/state locations, and cleanup/uninstall steps when relevant.
