@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from shadowforge.evidence import EvidenceStore
+from shadowforge.evidence import EvidenceError, EvidenceStore
 from shadowforge.harness import Harness
 from shadowforge.model_router import ModelRouter
 from shadowforge.models import ModelError
@@ -46,6 +46,8 @@ def _print_model_status(router: ModelRouter) -> int:
         marker = "FALLBACK" if status.fallback else "OK"
         suffix = f" -> using {status.active_model}" if status.fallback else ""
         print(f"[{marker}] {status.role:7}: {status.preferred_model}{suffix}")
+        if status.fallback_reason:
+            print(f"           reason: {status.fallback_reason}")
     mode = "QWEN-ONLY FALLBACK" if any(item.fallback for item in statuses) else "FULL MODEL STACK"
     print(f"Mode: {mode}")
     return 0
@@ -71,8 +73,11 @@ def main(argv: list[str] | None = None) -> int:
             target=args.target,
             arguments={"ports": args.ports},
         )
-    except (ScopeError, ValueError, KeyError) as exc:
+    except (ScopeError, ValueError, KeyError, EvidenceError) as exc:
         print(f"Error: {exc}")
+        return 2
+    except OSError as exc:
+        print(f"File/system error: {exc}")
         return 2
     print(json.dumps({"status": result.status, **result.data}, indent=2, sort_keys=True))
     return 0 if result.status == "ok" else 1
