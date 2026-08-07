@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ _STATE_VERSION = 1
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _MAX_OBSERVATIONS = 100
 _ALLOWED_STATUSES = frozenset({"ok", "error"})
+_OBSERVATION_KEYS = frozenset({"step", "tool", "target", "status", "data"})
 
 
 class StateError(ValueError):
@@ -78,7 +80,11 @@ class EngagementStateStore:
     def load_or_create(self, *, session_id: str, target: str, objective: str) -> EngagementState:
         path = self.path_for(session_id)
         if not path.exists():
-            return EngagementState(session_id=session_id, target=target, objective=objective.strip())
+            return EngagementState(
+                session_id=session_id,
+                target=target,
+                objective=objective.strip(),
+            )
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -101,10 +107,8 @@ class EngagementStateStore:
             temp.write_text(text, encoding="utf-8")
             os.replace(temp, path)
         except OSError as exc:
-            try:
+            with suppress(OSError):
                 temp.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise StateError(f"could not write session state: {exc}") from exc
 
     def append_result(
@@ -170,7 +174,7 @@ class EngagementStateStore:
             raise StateError("session observations must be a bounded list")
         parsed: list[Observation] = []
         for expected_step, item in enumerate(observations, start=1):
-            if not isinstance(item, dict) or set(item) != {"step", "tool", "target", "status", "data"}:
+            if not isinstance(item, dict) or set(item) != _OBSERVATION_KEYS:
                 raise StateError("session observation has an invalid schema")
             if (
                 not isinstance(item["step"], int)
