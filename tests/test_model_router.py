@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 
 from shadowforge.model_router import DEFAULT_MODELS, ModelRouter
@@ -32,6 +34,16 @@ def test_qwen_only_falls_back_for_optional_roles():
     assert statuses["coding"].fallback
     assert router.provider_for("critic", QWEN_ONLY).model == "qwen3.5:27b"
     assert router.provider_for("coding", QWEN_ONLY).model == "qwen3.5:27b"
+
+
+def test_discovery_is_used_when_inventory_not_supplied():
+    with patch(
+        "shadowforge.model_router.OllamaDiscovery.available_models",
+        return_value=QWEN_ONLY,
+    ):
+        statuses = ModelRouter().resolve()
+    assert statuses[1].fallback
+    assert statuses[1].active_model == "qwen3.5:27b"
 
 
 def test_primary_qwen_is_required():
