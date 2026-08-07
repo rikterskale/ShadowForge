@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 from shadowforge.cli import main
+from shadowforge.evidence import EvidenceError
 from shadowforge.model_router import ModelStatus
 from shadowforge.models import ModelError
 from shadowforge.tools.base import ToolResult
@@ -44,11 +45,24 @@ def test_cli_tool_error(tmp_path):
     assert code == 1
 
 
+def test_cli_reports_missing_scope_file(capsys):
+    code = main(["--scope", "missing.json", "--authorized", "scan", "192.0.2.1"])
+    assert code == 2
+    assert "File/system error" in capsys.readouterr().out
+
+
+def test_cli_reports_evidence_errors(tmp_path, capsys):
+    with patch("shadowforge.cli.Harness.execute", side_effect=EvidenceError("bad chain")):
+        code = main(["--scope", str(scope_file(tmp_path)), "--authorized", "scan", "192.0.2.1"])
+    assert code == 2
+    assert "bad chain" in capsys.readouterr().out
+
+
 def test_cli_models_full_stack(capsys):
     statuses = (
-        ModelStatus("primary", "qwen3.5:27b", "qwen3.5:27b", False),
-        ModelStatus("critic", "gemma4:31b", "gemma4:31b", False),
-        ModelStatus("coding", "devstral-small-2:24b", "devstral-small-2:24b", False),
+        ModelStatus("primary", "qwen3.5:27b", "qwen3.5:27b", False, None),
+        ModelStatus("critic", "gemma4:31b", "gemma4:31b", False, None),
+        ModelStatus("coding", "devstral-small-2:24b", "devstral-small-2:24b", False, None),
     )
     with patch("shadowforge.cli.ModelRouter.resolve", return_value=statuses):
         code = main(["models"])
@@ -60,9 +74,9 @@ def test_cli_models_full_stack(capsys):
 
 def test_cli_models_qwen_only_fallback(capsys):
     statuses = (
-        ModelStatus("primary", "qwen3.5:27b", "qwen3.5:27b", False),
-        ModelStatus("critic", "gemma4:31b", "qwen3.5:27b", True),
-        ModelStatus("coding", "devstral-small-2:24b", "qwen3.5:27b", True),
+        ModelStatus("primary", "qwen3.5:27b", "qwen3.5:27b", False, None),
+        ModelStatus("critic", "gemma4:31b", "qwen3.5:27b", True, "missing critic"),
+        ModelStatus("coding", "devstral-small-2:24b", "qwen3.5:27b", True, "missing coding"),
     )
     with patch("shadowforge.cli.ModelRouter.resolve", return_value=statuses):
         code = main(["models"])
@@ -71,6 +85,7 @@ def test_cli_models_qwen_only_fallback(capsys):
     assert "QWEN-ONLY FALLBACK" in output
     assert "[FALLBACK] critic" in output
     assert "-> using qwen3.5:27b" in output
+    assert "reason: missing critic" in output
 
 
 def test_cli_models_reports_missing_primary(capsys):
