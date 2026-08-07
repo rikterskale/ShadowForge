@@ -39,3 +39,46 @@ jobs:
       - name: Audit CI dependencies
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         run: pip-audit -r requirements-ci.txt
+
+  kali:
+    name: Kali rolling
+    runs-on: ubuntu-latest
+    container:
+      image: kalilinux/kali-rolling
+    steps:
+      - name: Install system prerequisites
+        shell: bash
+        run: |
+          set -euxo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git nmap python3 python3-pip python3-venv
+          python3 --version
+          nmap --version
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Create isolated environment and install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install -r requirements-ci.txt
+          python -m pip install -e .
+          python -m pip check
+      - name: Ruff
+        shell: bash
+        run: |
+          . .venv/bin/activate
+          ruff check .
+      - name: Tests and coverage
+        shell: bash
+        run: |
+          . .venv/bin/activate
+          coverage run -m pytest
+          coverage report --fail-under=99
+      - name: Build package and smoke test CLI
+        shell: bash
+        run: |
+          . .venv/bin/activate
+          python -m build
+          shadowforge --help
