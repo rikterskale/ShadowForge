@@ -1,28 +1,28 @@
 # ShadowForge
 
-ShadowForge is a scope-enforced foundation for **authorized penetration testing and security assessment** with local LLM routing, an allowlisted tool registry, and tamper-evident evidence collection.
+ShadowForge is a scope-enforced LLM-assisted harness for **authorized penetration testing and security assessment**. Version 0.2.0 adds a bounded model-driven planning path while preserving the Phase 1 scope, allowlist, evidence, and operator-approval boundaries.
 
-> **Phase 1 boundary:** model discovery/routing and penetration-testing tool execution are both implemented, but models do **not** autonomously drive tools yet. A later phase can add a structured proposal/validation loop while preserving the existing scope and allowlist boundaries.
+## Phase 2 in one sentence
+
+The operator supplies the exact target and objective; Qwen may propose **one** non-destructive `nmap_service_scan` action, ShadowForge validates the proposal in code, dry-run is the default, and execution still requires `--authorized --execute` and must pass through `Harness.execute()`.
 
 ## Supported platforms
 
-ShadowForge Phase 1 is continuously validated on:
+ShadowForge is continuously validated on:
 
-- Ubuntu Linux
-- Windows
-- Kali Linux rolling
-- Python 3.11 and 3.14 on the Ubuntu/Windows matrix
-- Kali's repository-provided Python inside the official `kalilinux/kali-rolling` container
+- Ubuntu Linux / Python 3.11 and 3.14
+- Windows / Python 3.11 and 3.14
+- Kali Linux rolling using Kali's repository-provided Python inside the official `kalilinux/kali-rolling` container
 
-Kali has its own beginner guide because Kali/Debian system Python is externally managed and ShadowForge should be installed in a virtual environment rather than with `sudo pip` or `--break-system-packages`. The Kali CI image deliberately follows the moving `kali-rolling` tag so CI detects compatibility changes in Kali as they occur; it is a compatibility canary rather than a reproducible frozen image.
+Kali has its own beginner guide because Kali/Debian system Python is externally managed. Use a virtual environment; do not install ShadowForge with `sudo pip` or `--break-system-packages`.
 
 ## LLM stack
 
-ShadowForge mirrors the ADAtlas Ollama model roles. The single source of truth is `DEFAULT_MODELS` in `src/shadowforge/model_router.py`:
+ShadowForge mirrors the ADAtlas Ollama model roles:
 
-- **Required primary — `qwen3.5:27b`**: planning and reasoning.
-- **Optional critic — `gemma4:31b`**: validation and second-opinion review.
-- **Optional coding — `devstral-small-2:24b`**: code/tooling assistance.
+- **Required primary — `qwen3.5:27b`**: bounded action planning and general reasoning.
+- **Optional critic — `gemma4:31b`**: advisory post-execution review.
+- **Optional coding — `devstral-small-2:24b`**: reserved for coding/tooling workflows as Phase 2 expands.
 
 Fallback behavior is deterministic:
 
@@ -33,62 +33,99 @@ Devstral missing  -> coding role uses Qwen
 Both missing      -> Qwen handles all three roles
 ```
 
-ShadowForge talks to Ollama's OpenAI-compatible endpoint at `http://127.0.0.1:11434/v1`.
-
 Install the required model:
 
 ```bash
 ollama pull qwen3.5:27b
 ```
 
-Optional specialist models:
+Optional specialists:
 
 ```bash
 ollama pull gemma4:31b
 ollama pull devstral-small-2:24b
 ```
 
-Check what ShadowForge will actually use:
+Check model routing:
 
 ```bash
 ollama list
 shadowforge models
 ```
 
-## Phase 1 capabilities
-
-- Engagement scope loaded from JSON and enforced before every active tool run.
-- IPv4 and IPv6 scope entries can coexist safely.
-- Explicit `--authorized` operator acknowledgement.
-- Allowlisted tool registry; raw model text is never executed as a shell command.
-- Qwen/Gemma/Devstral model discovery with Qwen-only fallback.
-- Non-destructive Nmap TCP/service discovery adapter.
-- Strict port/range validation before Nmap starts.
-- JSONL evidence with execution ID, scope, arguments, duration, ShadowForge version, results, and SHA-256 hash chaining.
-- Full evidence-chain verification before a new record is appended.
-- Clean CLI handling for scope, file-system, evidence, model, and tool errors.
-- Ruff, Windows/Ubuntu/Kali tests, a 99% branch-coverage gate, package build validation, dependency audit, and CodeQL.
-
-## Architecture
+## Phase 2 architecture
 
 ```text
-          Local model infrastructure
-      Qwen / Gemma / Devstral via Ollama
-                    |
-          discovery + role routing
-                    |
-           (no autonomous loop yet)
-
-Operator CLI -> scope gate -> Harness -> allowlisted Tool Registry -> Nmap adapter
-                              |
-                              +-> tamper-evident evidence JSONL
+Operator objective + exact target
+              |
+              v
+       Qwen primary planner
+              |
+              v
+       JSON ActionProposal
+              |
+              v
+  strict schema/policy validation
+       |      |       |
+       |      |       +-- only {"ports": ...}
+       |      +---------- target must equal operator target
+       +----------------- tool must be nmap_service_scan
+              |
+              v
+       EngagementScope.require()
+              |
+        dry-run by default
+              |
+     --execute + --authorized
+              |
+              v
+         Harness.execute()
+              |
+      ToolRegistry allowlist
+              |
+          Nmap adapter
+              |
+              v
+   verified hash-chained evidence
+              |
+              v
+      Gemma/Qwen advisory critic
+       (cannot launch tools)
 ```
 
-Future model-driven execution must use a structured proposal and validation layer and must still enter active execution through `Harness.execute()`.
+The model never receives a generic shell-execution capability. Model output is data that must pass deterministic validation before any active tool can run.
+
+## What the Phase 2 planner is allowed to propose
+
+Exactly this shape:
+
+```json
+{
+  "tool": "nmap_service_scan",
+  "target": "192.0.2.10",
+  "arguments": {
+    "ports": "22,80,443,8000-8100"
+  },
+  "rationale": "Identify common remote administration and web services."
+}
+```
+
+The parser rejects:
+
+- any other tool name
+- a target different from the operator-supplied target
+- extra JSON fields
+- extra argument fields
+- non-string port values
+- malformed, reversed, or out-of-range ports
+- empty or oversized rationale text
+- non-JSON planner output
+
+The target is also checked against the engagement scope before planning and again after parsing the model response.
 
 ## Quick start
 
-Requires Python 3.11+ on the primary Windows/Ubuntu support matrix and Nmap. Kali rolling is validated with Kali's repository-provided Python. Ollama is required only for model features.
+Requires Python 3.11+ on the primary Windows/Ubuntu matrix and Nmap. Kali rolling is validated with Kali's repository Python. Ollama is required for `models` and `agent` commands.
 
 ### Ubuntu / general Linux
 
@@ -108,8 +145,6 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Do not use `sudo pip` or `--break-system-packages` to install ShadowForge on Kali.
-
 ### Windows PowerShell
 
 ```powershell
@@ -127,38 +162,106 @@ Create `scope.json`:
 }
 ```
 
-Use only ranges covered by your written authorization. Scope names and targets must be non-empty strings; numeric JSON values are rejected rather than being interpreted as addresses.
+Use only targets covered by written authorization.
 
-Run service discovery:
+## Direct Phase 1 scan
+
+The direct command remains available:
 
 ```bash
-shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443,8000-8100
+shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
 ```
 
-Evidence is written to `artifacts/evidence.jsonl` by default.
+## Phase 2 agent dry-run
+
+Dry-run asks Qwen for a proposal, validates it, and prints it. **It does not run Nmap and does not create execution evidence.**
+
+```bash
+shadowforge --scope scope.json agent \
+  "Identify common web and remote administration services" \
+  --target 192.0.2.10
+```
+
+Example output shape:
+
+```json
+{
+  "mode": "dry-run",
+  "proposal": {
+    "arguments": {"ports": "22,80,443,3389"},
+    "rationale": "Identify common administration and web services.",
+    "target": "192.0.2.10",
+    "tool": "nmap_service_scan"
+  }
+}
+```
+
+## Phase 2 agent execution
+
+Execution requires both explicit flags:
+
+```bash
+shadowforge --scope scope.json --authorized agent \
+  "Identify common web and remote administration services" \
+  --target 192.0.2.10 \
+  --execute
+```
+
+The sequence is:
+
+1. verify the target is in scope
+2. ask Qwen for one structured proposal
+3. strictly parse and validate the proposal
+4. verify the proposal target is still in scope
+5. execute only through the allowlisted harness
+6. write verified hash-chained evidence
+7. ask the critic model for advisory interpretation
+
+If the critic is unavailable after execution, the evidenced tool result is preserved and returned with a separate `critique_error` field.
 
 ## Evidence
 
-Each execution record includes enough context to reproduce and review the action, and each record contains the prior record hash. Before a new record is appended, ShadowForge verifies every existing record's stored hash, recalculates each hash from the record contents, and verifies every previous-hash link. A malformed, edited, or broken chain is rejected rather than silently extended.
+Active execution writes to `artifacts/evidence.jsonl` by default.
 
-The hash chain is **tamper-evident**, not a substitute for access controls, signed logs, file locking, or external evidence retention.
+Each record includes:
 
-## Safety model
+- execution ID
+- timestamp
+- engagement scope name
+- tool
+- target
+- validated arguments
+- status
+- duration
+- ShadowForge version
+- result data
+- prior-record hash
+- current-record SHA-256 hash
 
-Phase 1 intentionally excludes exploit execution, password spraying, credential dumping, persistence, evasion, relay/coercion, arbitrary remote commands, and automatic propagation. Later modules should preserve explicit scope validation, capability allowlisting, evidence collection, dry-run support where appropriate, and operator approval boundaries.
+Before appending, ShadowForge verifies the full existing chain. A malformed, edited, or broken chain is rejected rather than silently extended.
+
+The chain is tamper-evident; it is not a substitute for signed logs, external evidence retention, or cross-process file locking.
+
+## Safety boundary
+
+Version 0.2.0 still intentionally excludes autonomous or model-selected exploit execution, password spraying, credential dumping, persistence, evasion, relay/coercion, arbitrary remote commands, automatic propagation, and generic shell execution.
+
+Phase 2 is **not** a free-running autonomous penetration-testing agent. It is one bounded proposal per invocation, against an operator-selected target, for the single non-destructive tool currently permitted by the policy layer.
+
+Future capabilities must add explicit typed schemas and policy checks; they must not obtain a bypass around `Harness.execute()`.
 
 ## Common errors
 
 - `required primary model ... is not installed`: run `ollama pull qwen3.5:27b`.
 - `could not query Ollama model inventory`: make sure Ollama is installed and running.
-- `outside engagement scope`: do not bypass the check; correct the scope only if authorization covers the target.
-- `File/system error`: verify the scope/evidence path and file permissions.
-- `ports must ...`: use individual ports or ascending ranges between 1 and 65535.
-- Kali `externally-managed-environment`: create/activate `.venv`; do not install ShadowForge into the system Python.
+- `proposal must ...` or `tool is not permitted ...`: the model produced output rejected by the deterministic policy layer; no active action was started.
+- `proposal target must exactly match ...`: the model changed the operator target; the proposal was blocked.
+- `outside engagement scope`: do not bypass the check; correct scope only if written authorization covers the target.
+- `Refusing to execute`: add `--authorized` only after confirming written authorization.
+- `ports must ...`: use individual ports or ascending ranges from 1 through 65535.
+- Kali `externally-managed-environment`: activate `.venv`; do not use `sudo pip` or `--break-system-packages`.
 
 ## Development
-
-CI pins the direct development-tool versions in `requirements-ci.txt`; transitive dependencies are resolved by pip and audited during CI. In addition to the Windows/Ubuntu matrix, CI installs and tests ShadowForge inside the official Kali rolling container.
 
 ```bash
 python -m pip install -r requirements-ci.txt
@@ -171,8 +274,14 @@ python -m pip check
 pip-audit -r requirements-ci.txt
 ```
 
+CI validates Windows, Ubuntu, and Kali, and CodeQL runs separately.
+
 Beginner guides:
 
 - `docs/WINDOWS_NOVICE_GUIDE.md`
 - `docs/LINUX_NOVICE_GUIDE.md`
 - `docs/KALI_NOVICE_GUIDE.md`
+
+Phase 2 design details:
+
+- `docs/PHASE2_ARCHITECTURE.md`
