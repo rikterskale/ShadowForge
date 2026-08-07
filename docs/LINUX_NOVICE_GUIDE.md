@@ -1,10 +1,8 @@
 # ShadowForge Linux Novice Guide
 
-Use ShadowForge only on systems and networks you have written permission to test. This guide is for Debian/Ubuntu-style Linux systems.
+Use ShadowForge only on systems and networks you have written permission to test. This guide is for Debian/Ubuntu-style Linux. Kali users should use `docs/KALI_NOVICE_GUIDE.md`.
 
-> **Kali Linux users:** use `docs/KALI_NOVICE_GUIDE.md`.
-
-ShadowForge 0.3.0 supports direct scans, Phase 2 single-action planning, and Phase 3 bounded multi-step reconnaissance.
+ShadowForge 0.4.0 supports direct scans, one-action agent mode, bounded recon, and optional persistent recon sessions.
 
 ## 1. Install prerequisites
 
@@ -13,7 +11,7 @@ sudo apt update
 sudo apt install -y git nmap python3 python3-venv python3-pip
 ```
 
-Install Ollama if you want `models`, `agent`, or `recon` features.
+Install Ollama if you want model-assisted features.
 
 ## 2. Clone and install
 
@@ -24,41 +22,21 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-```
-
-Verify:
-
-```bash
-python --version
-nmap --version
 shadowforge --help
 ```
 
 ## 3. Install local models
 
-Required:
-
 ```bash
 ollama pull qwen3.5:27b
-```
-
-Optional specialists:
-
-```bash
-ollama pull gemma4:31b
-ollama pull devstral-small-2:24b
-```
-
-Check routing:
-
-```bash
-ollama list
+ollama pull gemma4:31b       # optional
+ollama pull devstral-small-2:24b  # optional
 shadowforge models
 ```
 
-## 4. Create authorized scope
+Qwen is required. Missing Gemma or Devstral roles fall back to Qwen.
 
-Create `scope.json`:
+## 4. Create scope.json
 
 ```json
 {
@@ -75,28 +53,7 @@ Use only targets covered by written authorization.
 shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
 ```
 
-## 6. Phase 2 single-action agent
-
-Dry-run:
-
-```bash
-shadowforge --scope scope.json agent \
-  "Identify common web and administration services" \
-  --target 192.0.2.10
-```
-
-Execute only after confirming written authorization:
-
-```bash
-shadowforge --scope scope.json --authorized agent \
-  "Identify common web and administration services" \
-  --target 192.0.2.10 \
-  --execute
-```
-
-## 7. Phase 3 recon dry-run
-
-Phase 3 uses a code-enforced step budget from 1 through 5. Dry-run validates only the first decision and performs no active network action:
+## 6. Bounded recon dry-run
 
 ```bash
 shadowforge --scope scope.json recon \
@@ -105,14 +62,9 @@ shadowforge --scope scope.json recon \
   --max-steps 3
 ```
 
-Allowed Phase 3 tools are only:
+Dry-run performs no active network action. The hard step budget is 1 through 5.
 
-- `nmap_service_scan` with `ports`
-- `http_metadata_probe` with exactly `scheme` and integer `port`
-
-The HTTP probe requires one IP address, sends one `HEAD /`, follows no redirects, and does not collect cookies.
-
-## 8. Execute Phase 3 recon
+## 7. Active bounded recon
 
 ```bash
 shadowforge --scope scope.json --authorized recon \
@@ -122,32 +74,68 @@ shadowforge --scope scope.json --authorized recon \
   --execute
 ```
 
-Each active step is scope-checked and executed through `Harness.execute()`. Results are written to evidence and then supplied back to the planner only as untrusted data. The model cannot change the target or exceed the hard step budget.
+Each active step is independently scope-checked and must use an allowlisted adapter.
 
-## 9. Evidence
+## 8. Persistent Phase 4 session
 
-Active execution writes:
-
-```text
-artifacts/evidence.jsonl
+```bash
+shadowforge --scope scope.json --authorized recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --session assessment-01 \
+  --max-steps 3 \
+  --execute
 ```
 
-ShadowForge verifies the full existing SHA-256 hash chain before appending. Each active Phase 3 step gets its own record.
+State is written to:
+
+```text
+artifacts/state/assessment-01.json
+```
+
+Run the same command later with the same session ID, target, and objective to resume from prior sanitized observations.
+
+Use another directory if needed:
+
+```bash
+shadowforge --scope scope.json recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --session assessment-01 \
+  --state-dir ./engagement-state
+```
+
+Dry-run may read existing state but does not create or modify it.
+
+## 9. State safety rules
+
+Persistent state is context only. It cannot expand scope, select new targets, add tools, change argument schemas, or increase the execution budget.
+
+Only sanitized Nmap service observations and filtered HTTP metadata are stored. Unknown tools, cookies, authorization headers, cross-target observations, malformed step ordering, and unknown result fields are rejected or removed.
+
+A session is capped at 100 observations. Do not run multiple writers against the same session ID at the same time.
+
+## 10. Evidence versus state
+
+```text
+artifacts/evidence.jsonl       hash-chained execution evidence
+artifacts/state/<session>.json resumable planner context
+```
+
+Session state is not a replacement for evidence.
 
 ## Troubleshooting
 
-- `python3: command not found`: reinstall prerequisite packages.
+- `python3: command not found`: reinstall the prerequisite packages.
 - `nmap: command not found`: run `sudo apt install -y nmap`.
-- `ollama: command not found`: install Ollama and reopen the terminal.
-- `could not query Ollama model inventory`: make sure Ollama is running.
-- `required primary model ... is not installed`: run `ollama pull qwen3.5:27b`.
-- `tool is not permitted ...`: deterministic policy blocked the model decision.
-- `decision target must exactly match ...`: the model attempted to change the operator target.
-- `HTTP metadata probe requires one IP address`: use one authorized IP, not a CIDR, for HTTP probing.
-- `max_steps must ...`: choose a value from 1 through 5.
+- `required primary model ...`: run `ollama pull qwen3.5:27b`.
+- `session must ...`: use a safe ID such as `assessment-01`; do not use spaces or path separators.
+- `session ... is bound to target ...`: use the original target or create another session.
+- `session objective does not match ...`: reuse the exact objective or create another session.
+- `could not read session state`: inspect the file and permissions; malformed state is intentionally rejected.
+- `max_steps must ...`: choose 1 through 5.
 - `outside engagement scope`: do not bypass the check.
-- `Refusing to execute`: use `--authorized --execute` only after confirming written authorization.
-- `critique_error`: the active steps completed and were evidenced; only the advisory critic failed.
+- `Refusing to execute`: active model-assisted execution requires `--authorized --execute`.
 
 ## Update
 
@@ -162,7 +150,6 @@ python -m pip install -e .
 
 ```bash
 deactivate
-rm -rf .venv
 ```
 
-Remove the repository directory only when you are sure you no longer need it.
+Remove `.venv`, session state, evidence, or the repository only when you no longer need them.
