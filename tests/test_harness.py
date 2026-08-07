@@ -28,8 +28,14 @@ def test_harness_enforces_scope_and_writes_evidence(tmp_path):
     result = harness.execute(tool_name="fake", target="10.0.0.10", arguments={"x": 1})
     assert result.status == "ok"
     record = json.loads(evidence.read_text())
+    assert record["scope"] == "lab"
     assert record["tool"] == "fake"
     assert record["target"] == "10.0.0.10"
+    assert record["arguments"] == {"x": 1}
+    assert record["duration_ms"] >= 0
+    assert record["shadowforge_version"] == "0.1.0"
+    assert record["execution_id"]
+    assert len(record["record_hash"]) == 64
     with pytest.raises(ScopeError):
         harness.execute(tool_name="fake", target="10.0.1.10", arguments={})
     with pytest.raises(KeyError):
