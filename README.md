@@ -65,6 +65,7 @@ shadowforge models
 - Non-destructive Nmap TCP/service discovery adapter.
 - Strict port/range validation before Nmap starts.
 - JSONL evidence with execution ID, scope, arguments, duration, ShadowForge version, results, and SHA-256 hash chaining.
+- Full evidence-chain verification before a new record is appended.
 - Clean CLI handling for scope, file-system, evidence, model, and tool errors.
 - Ruff, Windows/Ubuntu/Kali tests, a 99% branch-coverage gate, package build validation, dependency audit, and CodeQL.
 
@@ -126,7 +127,7 @@ Create `scope.json`:
 }
 ```
 
-Use only ranges covered by your written authorization.
+Use only ranges covered by your written authorization. Scope names and targets must be non-empty strings; numeric JSON values are rejected rather than being interpreted as addresses.
 
 Run service discovery:
 
@@ -138,9 +139,9 @@ Evidence is written to `artifacts/evidence.jsonl` by default.
 
 ## Evidence
 
-Each execution record includes enough context to reproduce and review the action, and each record contains the prior record hash. If the final existing record is malformed, ShadowForge refuses to extend the chain rather than silently accepting damaged evidence.
+Each execution record includes enough context to reproduce and review the action, and each record contains the prior record hash. Before a new record is appended, ShadowForge verifies every existing record's stored hash, recalculates each hash from the record contents, and verifies every previous-hash link. A malformed, edited, or broken chain is rejected rather than silently extended.
 
-The hash chain is **tamper-evident**, not a substitute for access controls, signed logs, or external evidence retention.
+The hash chain is **tamper-evident**, not a substitute for access controls, signed logs, file locking, or external evidence retention.
 
 ## Safety model
 
