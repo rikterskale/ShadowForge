@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from shadowforge.tools.nmap import NmapTool
+from shadowforge.tools.nmap import NmapTool, validate_ports
 
 XML = (
     "<?xml version='1.0'?><nmaprun><host><ports>"
@@ -28,6 +28,16 @@ def test_nmap_command_is_constrained():
     ]
     with pytest.raises(ValueError):
         NmapTool.build_command("192.0.2.1", {"ports": "80 --script vuln"})
+    with pytest.raises(ValueError, match="string"):
+        NmapTool.build_command("192.0.2.1", {"ports": 80})
+
+
+def test_port_expression_validation():
+    assert validate_ports("1,22,80-443,65535") == "1,22,80-443,65535"
+    invalid = ["", "80,,443", "80-", "-443", "80-90-100", "0", "65536", "443-80"]
+    for value in invalid:
+        with pytest.raises(ValueError):
+            validate_ports(value)
 
 
 def test_nmap_missing_binary():
@@ -59,6 +69,10 @@ def test_nmap_error_paths():
         "shadowforge.tools.nmap.subprocess.run", side_effect=subprocess.TimeoutExpired("nmap", 1)
     ):
         assert tool.run("192.0.2.1", {}).status == "error"
+    with patch("shadowforge.tools.nmap.shutil.which", return_value="nmap"), patch(
+        "shadowforge.tools.nmap.subprocess.run", side_effect=OSError("permission denied")
+    ):
+        assert "could not start nmap" in tool.run("192.0.2.1", {}).data["error"]
     failed = subprocess.CompletedProcess([], 2, stdout="", stderr="boom")
     with patch("shadowforge.tools.nmap.shutil.which", return_value="nmap"), patch(
         "shadowforge.tools.nmap.subprocess.run", return_value=failed
