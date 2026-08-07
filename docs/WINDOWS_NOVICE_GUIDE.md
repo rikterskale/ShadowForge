@@ -2,41 +2,28 @@
 
 This guide assumes little command-line experience. Use ShadowForge only on systems and networks you have written permission to test.
 
-ShadowForge 0.2.0 has two ways to work:
+ShadowForge 0.3.0 has three ways to work:
 
-- **Direct scan**: you choose the ports yourself.
-- **Agent mode**: Qwen proposes one safe service-discovery scan for the exact target you provide. Agent mode is a dry-run unless you explicitly add `--execute`.
+- **Direct scan**: you choose the Nmap ports yourself.
+- **Agent mode**: Qwen proposes one safe Nmap service-discovery action.
+- **Recon mode**: Qwen may make a bounded sequence of up to five safe reconnaissance decisions using only service discovery and root HTTP metadata probing.
 
 ## 1. Install prerequisites
 
-1. Install Python 3.11 or newer from python.org and select **Add Python to PATH** during setup.
-2. Install Nmap for Windows from the official Nmap site using its normal installer.
+1. Install Python 3.11 or newer from python.org and select **Add Python to PATH**.
+2. Install Nmap for Windows using its normal installer.
 3. Install Git for Windows.
-4. Install Ollama for Windows if you want `shadowforge models` or Phase 2 `agent` mode.
+4. Install Ollama for Windows for `models`, `agent`, or `recon` mode.
 
 ## 2. Open PowerShell
 
-Press the Windows key, type `PowerShell`, and open **Windows PowerShell** or **Terminal**.
+Open **PowerShell** or **Windows Terminal**.
 
-## 3. Clone and enter ShadowForge
+## 3. Clone and install ShadowForge
 
 ```powershell
 git clone https://github.com/rikterskale/ShadowForge.git
 cd ShadowForge
-```
-
-If you are testing a Phase 2 branch before it is merged, switch to the branch named in that pull request.
-
-To update an existing copy later:
-
-```powershell
-git status
-git pull
-```
-
-## 4. Create an isolated Python environment
-
-```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -50,7 +37,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-## 5. Verify the basic tools
+Verify:
 
 ```powershell
 python --version
@@ -58,40 +45,33 @@ nmap --version
 shadowforge --help
 ```
 
-Success means each command prints version/help information without a Python traceback.
+## 4. Install local LLMs
 
-## 6. Install the local LLMs
-
-Qwen is the only required model for model features:
+Qwen is required for model-assisted modes:
 
 ```powershell
 ollama pull qwen3.5:27b
 ```
 
-Gemma and Devstral are optional specialists:
+Optional specialists:
 
 ```powershell
 ollama pull gemma4:31b
 ollama pull devstral-small-2:24b
 ```
 
-Check your local models and ShadowForge routing:
+Check routing:
 
 ```powershell
 ollama list
 shadowforge models
 ```
 
-Expected behavior:
+If Gemma or Devstral is missing, its role falls back to Qwen. If Qwen is missing, model-assisted commands stop with a setup error.
 
-- Qwen installed, Gemma missing: critic role falls back to Qwen.
-- Qwen installed, Devstral missing: coding role falls back to Qwen.
-- Only Qwen installed: all three roles use Qwen.
-- Qwen missing: model operations stop and tell you to install Qwen.
+## 5. Create your authorized scope
 
-## 7. Create your authorized scope file
-
-Create `scope.json` in the ShadowForge folder:
+Create `scope.json`:
 
 ```json
 {
@@ -100,146 +80,112 @@ Create `scope.json` in the ShadowForge folder:
 }
 ```
 
-Replace the example ranges with only the IP/CIDR ranges covered by your written authorization.
+Replace the examples with only ranges covered by your written authorization.
 
-## 8. Run a direct scan
+## 6. Direct scan
 
 ```powershell
 shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
 ```
 
-You may also use ascending ranges:
+Ports must be 1 through 65535. Extra Nmap flags and scripts are rejected.
+
+## 7. Phase 2 single-action agent
+
+Dry-run first:
 
 ```powershell
-shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 80,443,8000-8100
+shadowforge --scope scope.json agent "Identify common web and administration services" --target 192.0.2.10
 ```
 
-Ports must be between 1 and 65535. Empty entries, reversed ranges, and extra Nmap options are rejected.
+Dry-run validates one Qwen proposal and performs no network action.
 
-## 9. Use Phase 2 agent mode safely
-
-Agent mode requires Ollama and Qwen.
-
-The safest first command is a **dry-run**:
+To execute that bounded action:
 
 ```powershell
-shadowforge --scope scope.json agent "Identify common web and remote administration services" --target 192.0.2.10
+shadowforge --scope scope.json --authorized agent "Identify common web and administration services" --target 192.0.2.10 --execute
 ```
 
-A dry-run:
+Both `--authorized` and `--execute` are required for active model-assisted execution.
 
-1. checks that the target is in `scope.json`
-2. asks Qwen for one structured proposal
-3. validates the proposal
-4. prints the proposal
-5. does **not** run Nmap
-6. does **not** create a network-execution evidence record
+## 8. Phase 3 recon dry-run
 
-You should see JSON with:
-
-```text
-"mode": "dry-run"
-```
-
-and a proposal containing only:
-
-```text
-tool
-target
-arguments -> ports
-rationale
-```
-
-### What Qwen is allowed to choose
-
-Qwen may choose only the TCP ports for one `nmap_service_scan`.
-
-Qwen cannot change:
-
-- the target you supplied
-- the tool name
-- the allowed argument fields
-- the ShadowForge execution path
-
-If the model tries to add another command, another target, an Nmap script, or an extra field, ShadowForge rejects the proposal before active execution.
-
-## 10. Execute a validated Phase 2 proposal
-
-Only do this after confirming written authorization for the target:
+Phase 3 adds a hard step budget. A dry-run still plans only the first decision and performs no active network action:
 
 ```powershell
-shadowforge --scope scope.json --authorized agent "Identify common web and remote administration services" --target 192.0.2.10 --execute
+shadowforge --scope scope.json recon "Identify exposed services and collect safe web metadata" --target 192.0.2.10 --max-steps 3
 ```
 
-Both `--authorized` and `--execute` are required for active agent execution.
+`--max-steps` must be between 1 and 5.
 
-The order is:
+Phase 3 allows only:
+
+- `nmap_service_scan` with a validated `ports` field
+- `http_metadata_probe` with exactly `scheme` and integer `port`
+
+The HTTP probe sends one `HEAD /` request, follows no redirects, and does not collect cookies.
+
+## 9. Execute bounded Phase 3 recon
+
+Only after confirming written authorization:
+
+```powershell
+shadowforge --scope scope.json --authorized recon "Identify exposed services and collect safe web metadata" --target 192.0.2.10 --max-steps 3 --execute
+```
+
+The sequence is:
 
 ```text
-Your objective
-  -> Qwen proposal
-  -> schema/policy checks
+objective + exact target
+  -> Qwen decision
+  -> deterministic schema/policy validation
   -> scope check
   -> Harness.execute()
-  -> allowlisted Nmap adapter
   -> evidence
-  -> critic review
+  -> result returned as untrusted data
+  -> next bounded decision or completion
 ```
 
-The critic is advisory only and cannot launch another scan.
+The model cannot change the target, invent tools, add shell commands, choose arbitrary HTTP paths, or exceed the step budget.
 
-If the critic fails after the scan already completed, ShadowForge still returns the scan result and reports a separate `critique_error`.
+## 10. Review evidence
 
-## 11. Review the evidence
-
-Active runs write evidence to:
+Active runs write to:
 
 ```text
 artifacts\evidence.jsonl
 ```
 
-Each line records the scope, target, tool, arguments, result, duration, ShadowForge version, execution ID, and hash-chain values.
-
-Before ShadowForge adds another record, it verifies the existing evidence chain.
-
-## 12. Understand the Phase 2 safety boundary
-
-Phase 2 is not a free-running autonomous penetration-testing agent.
-
-It performs one bounded proposal per command and currently permits only non-destructive Nmap service discovery.
-
-It does not give the model a generic PowerShell, command-prompt, Python, or shell executor.
+Before adding a record, ShadowForge verifies the existing SHA-256 hash chain. Each active Phase 3 step gets its own evidence record.
 
 ## Troubleshooting
 
-- `python is not recognized`: reinstall Python with **Add Python to PATH**, then reopen PowerShell.
-- `nmap is not recognized`: reopen PowerShell after installing Nmap; reboot Windows if needed.
-- `ollama is not recognized`: install Ollama, then reopen PowerShell.
+- `python is not recognized`: reinstall Python with **Add Python to PATH** and reopen PowerShell.
+- `nmap is not recognized`: reopen PowerShell after installing Nmap.
+- `ollama is not recognized`: install Ollama and reopen PowerShell.
 - `could not query Ollama model inventory`: make sure Ollama is running.
 - `required primary model ... is not installed`: run `ollama pull qwen3.5:27b`.
-- `proposal must contain exactly ...`: Qwen returned output outside the fixed Phase 2 schema. No scan was started.
-- `tool is not permitted ...`: the model proposed an unsupported tool. No scan was started.
-- `proposal target must exactly match ...`: the model changed the target. No scan was started.
-- `outside engagement scope`: do not bypass the check. Correct the scope only when written authorization covers the target.
-- `Refusing to execute`: active agent mode needs `--execute` and `--authorized`.
-- `File/system error`: check the filename/path and permissions.
-- `ports must ...`: use forms such as `80`, `22,80,443`, or `8000-8100`.
-- `critique_error`: the scan already completed, but the advisory critic failed. Review the returned result and evidence.
+- `tool is not permitted ...`: the deterministic policy blocked the model decision.
+- `decision target must exactly match ...`: the model tried to change the operator target.
+- `HTTP metadata probe requires one IP address`: use one authorized IP, not a CIDR, for HTTP probing.
+- `max_steps must ...`: choose 1 through 5.
+- `outside engagement scope`: do not bypass the check; correct the scope only when authorization covers the target.
+- `Refusing to execute`: active model-assisted execution needs both `--execute` and `--authorized`.
+- `critique_error`: active steps already completed and were evidenced; only the advisory critic failed.
 
-## Cleanup or uninstall
+## Update
 
-Deactivate the Python environment:
+```powershell
+git status
+git pull
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+```
+
+## Cleanup
 
 ```powershell
 deactivate
 ```
 
-Then delete `.venv` if you no longer need the environment. Delete the cloned `ShadowForge` folder if you no longer need the project.
-
-Ollama models can be removed separately:
-
-```powershell
-ollama rm qwen3.5:27b
-ollama rm gemma4:31b
-ollama rm devstral-small-2:24b
-```
+Delete `.venv` and the cloned repository only if you no longer need them. Ollama models can be removed with `ollama rm <model-name>`.
