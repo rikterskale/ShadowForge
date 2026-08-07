@@ -28,12 +28,16 @@ def test_available_models_parses_name_and_model_fields():
 
 
 def test_available_models_reports_connection_and_payload_errors():
-    with patch("shadowforge.ollama.urllib.request.urlopen", side_effect=OSError("offline")):
-        with pytest.raises(ModelError, match="could not query Ollama"):
-            OllamaDiscovery().available_models()
-    with patch(
-        "shadowforge.ollama.urllib.request.urlopen",
-        return_value=Response(b'{"models":{}}'),
+    with (
+        patch("shadowforge.ollama.urllib.request.urlopen", side_effect=OSError("offline")),
+        pytest.raises(ModelError, match="could not query Ollama"),
     ):
-        with pytest.raises(ModelError, match="could not query Ollama"):
-            OllamaDiscovery().available_models()
+        OllamaDiscovery().available_models()
+    with (
+        patch(
+            "shadowforge.ollama.urllib.request.urlopen",
+            return_value=Response(b'{"models":{}}'),
+        ),
+        pytest.raises(ModelError, match="could not query Ollama"),
+    ):
+        OllamaDiscovery().available_models()
