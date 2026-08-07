@@ -1,8 +1,7 @@
 import pytest
 
-from shadowforge.model_router import DEFAULT_MODELS, ModelRouter
 from shadowforge.models import ModelError
-
+from shadowforge.model_router import DEFAULT_MODELS, ModelRouter
 
 ALL_MODELS = frozenset(DEFAULT_MODELS.values())
 QWEN_ONLY = frozenset({"qwen3.5:27b"})
