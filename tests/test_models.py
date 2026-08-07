@@ -23,6 +23,8 @@ def test_openai_compatible_provider():
 
 def test_openai_compatible_provider_errors():
     provider = OpenAICompatibleProvider("http://localhost:8000/v1", "model")
-    with patch("shadowforge.models.urllib.request.urlopen", side_effect=OSError("offline")):
-        with pytest.raises(ModelError):
-            provider.complete("system", "user")
+    with (
+        patch("shadowforge.models.urllib.request.urlopen", side_effect=OSError("offline")),
+        pytest.raises(ModelError),
+    ):
+        provider.complete("system", "user")
