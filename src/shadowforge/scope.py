@@ -36,7 +36,10 @@ class EngagementScope:
             candidate = ipaddress.ip_network(target, strict=False)
         except ValueError as exc:
             raise ScopeError("Phase 1 accepts only IP addresses and CIDR ranges") from exc
-        return any(candidate.subnet_of(network) for network in self.networks)
+        return any(
+            candidate.version == network.version and candidate.subnet_of(network)
+            for network in self.networks
+        )
 
     def require(self, target: str) -> None:
         if not self.contains(target):
