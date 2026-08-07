@@ -10,6 +10,25 @@ from typing import Any
 from shadowforge.tools.base import ToolResult
 
 
+def validate_ports(value: str) -> str:
+    """Validate a comma-separated list of ports and ascending port ranges."""
+
+    if not isinstance(value, str) or not value:
+        raise ValueError("ports must be a non-empty numeric port expression")
+    for item in value.split(","):
+        if not item:
+            raise ValueError("ports must not contain empty entries")
+        pieces = item.split("-")
+        if len(pieces) not in {1, 2} or any(not piece.isdigit() for piece in pieces):
+            raise ValueError("ports must contain only individual ports or ranges such as 80,443,8000-8100")
+        numbers = [int(piece) for piece in pieces]
+        if any(number < 1 or number > 65535 for number in numbers):
+            raise ValueError("ports must be between 1 and 65535")
+        if len(numbers) == 2 and numbers[0] > numbers[1]:
+            raise ValueError("port ranges must be in ascending order")
+    return value
+
+
 class NmapTool:
     name = "nmap_service_scan"
 
@@ -19,8 +38,9 @@ class NmapTool:
     @staticmethod
     def build_command(target: str, arguments: dict[str, Any]) -> list[str]:
         ports = arguments.get("ports", "1-1024")
-        if not isinstance(ports, str) or not ports.replace(",", "").replace("-", "").isdigit():
-            raise ValueError("ports must be a numeric Nmap port expression")
+        if not isinstance(ports, str):
+            raise ValueError("ports must be a string")
+        validate_ports(ports)
         return ["nmap", "-sT", "-sV", "--version-light", "-p", ports, "-oX", "-", target]
 
     def run(self, target: str, arguments: dict[str, Any]) -> ToolResult:
@@ -37,6 +57,8 @@ class NmapTool:
             )
         except subprocess.TimeoutExpired:
             return ToolResult(status="error", data={"error": "nmap timed out"})
+        except OSError as exc:
+            return ToolResult(status="error", data={"error": f"could not start nmap: {exc}"})
         if completed.returncode != 0:
             return ToolResult(
                 status="error",
