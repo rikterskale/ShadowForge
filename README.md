@@ -125,7 +125,7 @@ Phase 1 intentionally excludes exploit execution, password spraying, credential 
 
 ## Development
 
-CI uses pinned direct development-tool versions from `requirements-ci.txt`.
+CI pins the direct development-tool versions in `requirements-ci.txt`; transitive dependencies are resolved by pip and audited during CI.
 
 ```bash
 python -m pip install -r requirements-ci.txt
