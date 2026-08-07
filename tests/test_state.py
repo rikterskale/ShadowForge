@@ -166,7 +166,7 @@ def test_existing_session_cannot_be_rebound(tmp_path):
 def test_malformed_json_is_rejected(tmp_path):
     store = EngagementStateStore(tmp_path)
     path = store.path_for("s1")
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("not-json")
     with pytest.raises(StateError, match="could not read"):
         store.load_or_create(session_id="s1", target="192.0.2.10", objective="Inspect")
@@ -260,7 +260,7 @@ def test_save_wraps_write_errors_and_cleans_temp(tmp_path):
 def test_load_wraps_read_oserror(tmp_path):
     store = EngagementStateStore(tmp_path)
     path = store.path_for("s1")
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(valid_payload()))
     with (
         patch("pathlib.Path.read_text", side_effect=OSError("unreadable")),
