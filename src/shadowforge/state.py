@@ -12,6 +12,7 @@ from typing import Any
 _STATE_VERSION = 1
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _MAX_OBSERVATIONS = 100
+_ALLOWED_STATUSES = frozenset({"ok", "error"})
 
 
 class StateError(ValueError):
@@ -118,6 +119,13 @@ class EngagementStateStore:
     ) -> None:
         if len(state.observations) >= _MAX_OBSERVATIONS:
             raise StateError("session observation limit reached")
+        if target != state.target:
+            raise StateError("observation target must match the session target")
+        if status not in _ALLOWED_STATUSES:
+            raise StateError("observation status must be 'ok' or 'error'")
+        expected_step = len(state.observations) + 1
+        if step != expected_step:
+            raise StateError(f"observation step must be {expected_step}")
         safe_data = self._sanitize(tool, data)
         state.observations.append(Observation(step, tool, target, status, safe_data))
         self.save(state)
@@ -156,23 +164,37 @@ class EngagementStateStore:
             raise StateError("session target must be a non-empty string")
         if not isinstance(objective, str) or not objective:
             raise StateError("session objective must be a non-empty string")
-        if summary is not None and not isinstance(summary, str):
-            raise StateError("session summary must be a string or null")
+        if summary is not None and (not isinstance(summary, str) or len(summary) > 2000):
+            raise StateError("session summary must be null or a string up to 2000 characters")
         if not isinstance(observations, list) or len(observations) > _MAX_OBSERVATIONS:
             raise StateError("session observations must be a bounded list")
         parsed: list[Observation] = []
-        for item in observations:
+        for expected_step, item in enumerate(observations, start=1):
             if not isinstance(item, dict) or set(item) != {"step", "tool", "target", "status", "data"}:
                 raise StateError("session observation has an invalid schema")
             if (
                 not isinstance(item["step"], int)
                 or isinstance(item["step"], bool)
-                or item["step"] < 1
                 or not isinstance(item["tool"], str)
                 or not isinstance(item["target"], str)
                 or not isinstance(item["status"], str)
                 or not isinstance(item["data"], dict)
             ):
                 raise StateError("session observation has invalid field types")
-            parsed.append(Observation(**item))
+            if item["step"] != expected_step:
+                raise StateError("session observation steps must be contiguous and start at 1")
+            if item["target"] != target:
+                raise StateError("session observation target does not match session target")
+            if item["status"] not in _ALLOWED_STATUSES:
+                raise StateError("session observation has an invalid status")
+            safe_data = cls._sanitize(item["tool"], item["data"])
+            parsed.append(
+                Observation(
+                    item["step"],
+                    item["tool"],
+                    item["target"],
+                    item["status"],
+                    safe_data,
+                )
+            )
         return EngagementState(session_id, target, objective, parsed, summary, _STATE_VERSION)
