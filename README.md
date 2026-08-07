@@ -4,6 +4,18 @@ ShadowForge is a scope-enforced foundation for **authorized penetration testing 
 
 > **Phase 1 boundary:** model discovery/routing and penetration-testing tool execution are both implemented, but models do **not** autonomously drive tools yet. A later phase can add a structured proposal/validation loop while preserving the existing scope and allowlist boundaries.
 
+## Supported platforms
+
+ShadowForge Phase 1 is continuously validated on:
+
+- Ubuntu Linux
+- Windows
+- Kali Linux rolling
+- Python 3.11 and 3.14 on the Ubuntu/Windows matrix
+- Kali's repository-provided Python inside the official `kalilinux/kali-rolling` container
+
+Kali has its own beginner guide because Kali/Debian system Python is externally managed and ShadowForge should be installed in a virtual environment rather than with `sudo pip` or `--break-system-packages`.
+
 ## LLM stack
 
 ShadowForge mirrors the ADAtlas Ollama model roles. The single source of truth is `DEFAULT_MODELS` in `src/shadowforge/model_router.py`:
@@ -54,7 +66,7 @@ shadowforge models
 - Strict port/range validation before Nmap starts.
 - JSONL evidence with execution ID, scope, arguments, duration, ShadowForge version, results, and SHA-256 hash chaining.
 - Clean CLI handling for scope, file-system, evidence, model, and tool errors.
-- Ruff, multi-platform tests, a 99% branch-coverage gate, package build validation, dependency audit, and CodeQL.
+- Ruff, Windows/Ubuntu/Kali tests, a 99% branch-coverage gate, package build validation, dependency audit, and CodeQL.
 
 ## Architecture
 
@@ -75,14 +87,33 @@ Future model-driven execution must use a structured proposal and validation laye
 
 ## Quick start
 
-Requires Python 3.11+ and Nmap. Ollama is required only for model features.
+Requires Python 3.11+ on the primary Windows/Ubuntu support matrix and Nmap. Kali rolling is validated with Kali's repository-provided Python. Ollama is required only for model features.
+
+### Ubuntu / general Linux
 
 ```bash
-python -m venv .venv
-# Linux/macOS
+python3 -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
+python -m pip install -e .
+```
+
+### Kali Linux
+
+```bash
+sudo apt update
+sudo apt install -y git nmap python3 python3-venv python3-pip ca-certificates
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+Do not use `sudo pip` or `--break-system-packages` to install ShadowForge on Kali.
+
+### Windows PowerShell
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e .
 ```
 
@@ -122,10 +153,11 @@ Phase 1 intentionally excludes exploit execution, password spraying, credential 
 - `outside engagement scope`: do not bypass the check; correct the scope only if authorization covers the target.
 - `File/system error`: verify the scope/evidence path and file permissions.
 - `ports must ...`: use individual ports or ascending ranges between 1 and 65535.
+- Kali `externally-managed-environment`: create/activate `.venv`; do not install ShadowForge into the system Python.
 
 ## Development
 
-CI pins the direct development-tool versions in `requirements-ci.txt`; transitive dependencies are resolved by pip and audited during CI.
+CI pins the direct development-tool versions in `requirements-ci.txt`; transitive dependencies are resolved by pip and audited during CI. In addition to the Windows/Ubuntu matrix, CI installs and tests ShadowForge inside the official Kali rolling container.
 
 ```bash
 python -m pip install -r requirements-ci.txt
@@ -142,3 +174,4 @@ Beginner guides:
 
 - `docs/WINDOWS_NOVICE_GUIDE.md`
 - `docs/LINUX_NOVICE_GUIDE.md`
+- `docs/KALI_NOVICE_GUIDE.md`
