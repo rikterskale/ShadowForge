@@ -8,6 +8,7 @@ from typing import Any
 
 from shadowforge.harness import Harness
 from shadowforge.model_router import ModelRouter
+from shadowforge.models import ModelError
 from shadowforge.scope import EngagementScope
 from shadowforge.tools.base import ToolResult
 from shadowforge.tools.nmap import validate_ports
@@ -69,6 +70,7 @@ class AgentRun:
     proposal: ActionProposal
     result: ToolResult | None
     critique: str | None
+    critique_error: str | None = None
 
 
 @dataclass
@@ -137,5 +139,13 @@ class AgentCoordinator:
             target=proposal.target,
             arguments=proposal.arguments,
         )
-        critique = self.critique(objective=objective, proposal=proposal, result=result)
+        try:
+            critique = self.critique(objective=objective, proposal=proposal, result=result)
+        except ModelError as exc:
+            return AgentRun(
+                proposal=proposal,
+                result=result,
+                critique=None,
+                critique_error=str(exc),
+            )
         return AgentRun(proposal=proposal, result=result, critique=critique)
