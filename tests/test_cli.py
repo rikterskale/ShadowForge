@@ -99,7 +99,7 @@ def test_cli_models_reports_missing_primary(capsys):
     assert "Model error" in capsys.readouterr().out
 
 
-def sample_run(*, executed=False, status="ok"):
+def sample_run(*, executed=False, status="ok", critique_error=None):
     proposal = ActionProposal(
         "nmap_service_scan",
         "192.0.2.10",
@@ -108,7 +108,13 @@ def sample_run(*, executed=False, status="ok"):
     )
     if not executed:
         return AgentRun(proposal, None, None)
-    return AgentRun(proposal, ToolResult(status, {"services": []}), "Looks sufficient.")
+    critique = None if critique_error else "Looks sufficient."
+    return AgentRun(
+        proposal,
+        ToolResult(status, {"services": []}),
+        critique,
+        critique_error,
+    )
 
 
 def test_cli_agent_requires_scope(capsys):
@@ -169,6 +175,45 @@ def test_cli_agent_execute_prints_result_and_critique(tmp_path, capsys):
     assert code == 0
     assert '"mode": "execute"' in output
     assert '"critique": "Looks sufficient."' in output
+
+
+def test_cli_agent_preserves_result_when_critic_fails(tmp_path, capsys):
+    run = sample_run(executed=True, critique_error="critic offline")
+    with patch("shadowforge.cli.AgentCoordinator.run", return_value=run):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "--authorized",
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+                "--execute",
+            ]
+        )
+    output = capsys.readouterr().out
+    assert code == 0
+    assert '"critique_error": "critic offline"' in output
+    assert '"status": "ok"' in output
+
+
+def test_cli_agent_returns_one_for_tool_error(tmp_path):
+    run = sample_run(executed=True, status="error")
+    with patch("shadowforge.cli.AgentCoordinator.run", return_value=run):
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "--authorized",
+                "agent",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+                "--execute",
+            ]
+        )
+    assert code == 1
 
 
 def test_cli_agent_reports_policy_and_model_errors(tmp_path, capsys):
