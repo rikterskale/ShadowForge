@@ -38,7 +38,25 @@ jobs:
         run: python -m build
       - name: Audit CI dependencies
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-        run: pip-audit -r requirements-ci.txt
+        shell: bash
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if pip-audit -r requirements-ci.txt; then
+              exit 0
+            fi
+            status=$?
+            if [ "$status" -eq 1 ]; then
+              echo "pip-audit reported a vulnerability; not retrying."
+              exit 1
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "pip-audit infrastructure failure on attempt $attempt; retrying."
+              sleep 5
+            fi
+          done
+          echo "pip-audit failed after 3 infrastructure attempts."
+          exit 2
 
   kali:
     name: Kali rolling
