@@ -5,15 +5,14 @@ This guide is specifically for Kali Linux. It assumes little command-line experi
 ## 1. Open Terminal
 Open the **Terminal** application from the Kali menu.
 
-## 2. Update Kali
+## 2. Refresh Kali's package list
 Run:
 
 ```bash
 sudo apt update
-sudo apt full-upgrade -y
 ```
 
-If Kali asks you to restart after upgrading, restart before continuing.
+A full Kali system upgrade is not required just to install ShadowForge. If you normally maintain Kali with `apt full-upgrade`, do that separately according to your normal system-maintenance process.
 
 ## 3. Install required system packages
 Run:
@@ -142,16 +141,16 @@ ShadowForge writes evidence to:
 artifacts/evidence.jsonl
 ```
 
-Evidence records contain execution metadata and a SHA-256 hash chain so later changes to the chain can be detected.
+Evidence records contain execution metadata and a SHA-256 hash chain. Before ShadowForge appends a new record, it verifies every existing record hash and every previous-hash link; a modified or broken chain is rejected.
 
-## 9. Verify the evidence file
+## 9. Inspect the evidence file
 Run:
 
 ```bash
 cat artifacts/evidence.jsonl
 ```
 
-The file is JSON Lines format: one JSON record per execution.
+The file is JSON Lines format: one JSON record per execution. Viewing the file with `cat` only displays it; ShadowForge's chain validation happens automatically before the next record is appended.
 
 ## 10. Common Kali problems
 
