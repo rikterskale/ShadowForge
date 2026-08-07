@@ -14,6 +14,22 @@ def test_scope_contains_subnets(tmp_path):
     assert not scope.contains("10.0.1.1")
 
 
+def test_scope_handles_mixed_ip_families_in_any_order(tmp_path):
+    path = tmp_path / "scope.json"
+    path.write_text(
+        json.dumps({"name": "mixed", "targets": ["2001:db8::/32", "192.0.2.0/24"]})
+    )
+    scope = EngagementScope.from_file(path)
+    assert scope.contains("192.0.2.10")
+    assert scope.contains("2001:db8::10")
+    path.write_text(
+        json.dumps({"name": "mixed", "targets": ["192.0.2.0/24", "2001:db8::/32"]})
+    )
+    scope = EngagementScope.from_file(path)
+    assert scope.contains("192.0.2.10")
+    assert scope.contains("2001:db8::10")
+
+
 def test_scope_rejects_bad_files(tmp_path):
     path = tmp_path / "scope.json"
     path.write_text("{}")
