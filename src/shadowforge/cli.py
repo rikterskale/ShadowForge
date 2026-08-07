@@ -1,0 +1,87 @@
+"""Command-line interface."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from shadowforge.evidence import EvidenceError, EvidenceStore
+from shadowforge.harness import Harness
+from shadowforge.model_router import ModelRouter
+from shadowforge.models import ModelError
+from shadowforge.scope import EngagementScope, ScopeError
+from shadowforge.tools.base import ToolRegistry
+from shadowforge.tools.nmap import NmapTool
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="shadowforge",
+        description="Scope-enforced harness for authorized penetration testing.",
+    )
+    parser.add_argument("--scope", help="Path to engagement scope JSON (required for active tools)")
+    parser.add_argument(
+        "--authorized",
+        action="store_true",
+        help="Confirm that you have written authorization for the supplied scope",
+    )
+    parser.add_argument("--evidence", default="artifacts/evidence.jsonl")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("models", help="Show local Ollama model availability and fallback routing")
+    scan = sub.add_parser("scan", help="Run allowlisted non-destructive service discovery")
+    scan.add_argument("target")
+    scan.add_argument("--ports", default="1-1024")
+    return parser
+
+
+def _print_model_status(router: ModelRouter) -> int:
+    try:
+        statuses = router.resolve()
+    except ModelError as exc:
+        print(f"Model error: {exc}")
+        return 2
+    print("ShadowForge Model Status")
+    for status in statuses:
+        marker = "FALLBACK" if status.fallback else "OK"
+        suffix = f" -> using {status.active_model}" if status.fallback else ""
+        print(f"[{marker}] {status.role:7}: {status.preferred_model}{suffix}")
+        if status.fallback_reason:
+            print(f"           reason: {status.fallback_reason}")
+    mode = "QWEN-ONLY FALLBACK" if any(item.fallback for item in statuses) else "FULL MODEL STACK"
+    print(f"Mode: {mode}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command == "models":
+        return _print_model_status(ModelRouter())
+    if not args.scope:
+        print("Refusing to run: active tools require --scope with an authorized scope file.")
+        return 2
+    if not args.authorized:
+        print("Refusing to run: pass --authorized only when you have written authorization.")
+        return 2
+    try:
+        scope = EngagementScope.from_file(Path(args.scope))
+        registry = ToolRegistry()
+        registry.register(NmapTool())
+        harness = Harness(scope=scope, registry=registry, evidence=EvidenceStore(args.evidence))
+        result = harness.execute(
+            tool_name="nmap_service_scan",
+            target=args.target,
+            arguments={"ports": args.ports},
+        )
+    except (ScopeError, ValueError, KeyError, EvidenceError) as exc:
+        print(f"Error: {exc}")
+        return 2
+    except OSError as exc:
+        print(f"File/system error: {exc}")
+        return 2
+    print(json.dumps({"status": result.status, **result.data}, indent=2, sort_keys=True))
+    return 0 if result.status == "ok" else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
