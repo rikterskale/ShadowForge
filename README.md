@@ -1,10 +1,10 @@
 # ShadowForge
 
-ShadowForge is a scope-enforced LLM-assisted harness for **authorized penetration testing and security assessment**. Version 0.2.0 adds a bounded model-driven planning path while preserving the Phase 1 scope, allowlist, evidence, and operator-approval boundaries.
+ShadowForge is a scope-enforced LLM-assisted harness for **authorized penetration testing and security assessment**. Version 0.3.0 adds bounded multi-step reconnaissance while preserving the existing scope, allowlist, evidence, and operator-approval boundaries.
 
-## Phase 2 in one sentence
+## Phase 3 in one sentence
 
-The operator supplies the exact target and objective; Qwen may propose **one** non-destructive `nmap_service_scan` action, ShadowForge validates the proposal in code, dry-run is the default, and execution still requires `--authorized --execute` and must pass through `Harness.execute()`.
+The operator supplies the exact target and objective; Qwen may make up to five deterministic-policy-validated reconnaissance decisions using only non-destructive service discovery and root HTTP metadata probing, while every active step still passes through `Harness.execute()` and the engagement scope.
 
 ## Supported platforms
 
@@ -12,26 +12,17 @@ ShadowForge is continuously validated on:
 
 - Ubuntu Linux / Python 3.11 and 3.14
 - Windows / Python 3.11 and 3.14
-- Kali Linux rolling using Kali's repository-provided Python inside the official `kalilinux/kali-rolling` container
+- Kali Linux rolling using Kali's repository-provided Python in the official `kalilinux/kali-rolling` container
 
-Kali has its own beginner guide because Kali/Debian system Python is externally managed. Use a virtual environment; do not install ShadowForge with `sudo pip` or `--break-system-packages`.
+Kali users should install ShadowForge inside a virtual environment. Do not use `sudo pip` or `--break-system-packages`.
 
-## LLM stack
+## Local LLM stack
 
-ShadowForge mirrors the ADAtlas Ollama model roles:
+ShadowForge mirrors the ADAtlas Ollama roles:
 
-- **Required primary — `qwen3.5:27b`**: bounded action planning and general reasoning.
-- **Optional critic — `gemma4:31b`**: advisory post-execution review.
-- **Optional coding — `devstral-small-2:24b`**: reserved for coding/tooling workflows as Phase 2 expands.
-
-Fallback behavior is deterministic:
-
-```text
-Qwen missing      -> model operations stop with a setup error
-Gemma missing     -> critic role uses Qwen
-Devstral missing  -> coding role uses Qwen
-Both missing      -> Qwen handles all three roles
-```
+- **Required primary — `qwen3.5:27b`**: bounded planning and reasoning.
+- **Optional critic — `gemma4:31b`**: advisory post-run review; falls back to Qwen.
+- **Optional coding — `devstral-small-2:24b`**: coding/tooling role; falls back to Qwen.
 
 Install the required model:
 
@@ -46,114 +37,102 @@ ollama pull gemma4:31b
 ollama pull devstral-small-2:24b
 ```
 
-Check model routing:
+Check routing:
 
 ```bash
 ollama list
 shadowforge models
 ```
 
-## Phase 2 architecture
+## Architecture
 
 ```text
 Operator objective + exact target
               |
               v
-       Qwen primary planner
+        Qwen recon planner
               |
               v
-       JSON ActionProposal
+    one structured decision
               |
               v
-  strict schema/policy validation
-       |      |       |
-       |      |       +-- only {"ports": ...}
-       |      +---------- target must equal operator target
-       +----------------- tool must be nmap_service_scan
+ deterministic schema/policy
+       |                |
+       |                +-- http_metadata_probe
+       |                    HEAD / only, no redirects
+       +-- nmap_service_scan
               |
-              v
-       EngagementScope.require()
+     exact-target validation
               |
-        dry-run by default
+       EngagementScope
+              |
+      step budget: 1..5
+              |
+      dry-run by default
               |
      --execute + --authorized
               |
               v
-         Harness.execute()
+        Harness.execute()
               |
-      ToolRegistry allowlist
+       ToolRegistry allowlist
               |
-          Nmap adapter
+       verified evidence
               |
-              v
-   verified hash-chained evidence
+   result returned as untrusted data
               |
-              v
-      Gemma/Qwen advisory critic
-       (cannot launch tools)
+        next bounded decision
+              |
+      Gemma/Qwen critic
+       (no execution handle)
 ```
 
-The model never receives a generic shell-execution capability. Model output is data that must pass deterministic validation before any active tool can run.
+Tool output is explicitly labeled as **untrusted data** when fed back to the planner. Instructions found in banners, headers, or other target-controlled output do not gain execution authority. Every new model decision must independently pass the deterministic parser and policy.
 
-## What the Phase 2 planner is allowed to propose
+## Allowed Phase 3 capabilities
 
-Exactly this shape:
+### `nmap_service_scan`
+
+The planner may choose only a validated `ports` expression. Nmap still runs through the existing constrained adapter.
 
 ```json
 {
+  "decision": "action",
   "tool": "nmap_service_scan",
   "target": "192.0.2.10",
-  "arguments": {
-    "ports": "22,80,443,8000-8100"
-  },
-  "rationale": "Identify common remote administration and web services."
+  "arguments": {"ports": "22,80,443"},
+  "rationale": "Identify common exposed services."
 }
 ```
 
-The parser rejects:
+### `http_metadata_probe`
 
-- any other tool name
-- a target different from the operator-supplied target
-- extra JSON fields
-- extra argument fields
-- non-string port values
-- malformed, reversed, or out-of-range ports
-- empty or oversized rationale text
-- non-JSON planner output
+The HTTP adapter requires a single IP address and accepts only `scheme` and `port`. It sends exactly one `HEAD /` request, does not follow redirects, and stores only an allowlisted subset of response headers. Cookies are not collected.
 
-The target is also checked against the engagement scope before planning and again after parsing the model response.
-
-## Quick start
-
-Requires Python 3.11+ on the primary Windows/Ubuntu matrix and Nmap. Kali rolling is validated with Kali's repository Python. Ollama is required for `models` and `agent` commands.
-
-### Ubuntu / general Linux
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+```json
+{
+  "decision": "action",
+  "tool": "http_metadata_probe",
+  "target": "192.0.2.10",
+  "arguments": {"scheme": "https", "port": 443},
+  "rationale": "Collect root HTTPS metadata."
+}
 ```
 
-### Kali Linux
+### Completion
 
-```bash
-sudo apt update
-sudo apt install -y git nmap python3 python3-venv python3-pip ca-certificates
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+The planner can stop before the step budget is exhausted:
+
+```json
+{
+  "decision": "complete",
+  "summary": "The bounded reconnaissance objective is satisfied."
+}
 ```
 
-### Windows PowerShell
+## Scope file
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e .
-```
-
-Create `scope.json`:
+Create `scope.json` using only targets covered by written authorization:
 
 ```json
 {
@@ -162,104 +141,95 @@ Create `scope.json`:
 }
 ```
 
-Use only targets covered by written authorization.
+The model cannot select or expand targets. Every action target must exactly match the operator-supplied target and pass scope validation.
 
-## Direct Phase 1 scan
-
-The direct command remains available:
+## Direct service discovery
 
 ```bash
 shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
 ```
 
-## Phase 2 agent dry-run
+## Phase 2 single-action agent
 
-Dry-run asks Qwen for a proposal, validates it, and prints it. **It does not run Nmap and does not create execution evidence.**
+Dry-run:
 
 ```bash
 shadowforge --scope scope.json agent \
-  "Identify common web and remote administration services" \
+  "Identify common web and administration services" \
   --target 192.0.2.10
 ```
 
-Example output shape:
-
-```json
-{
-  "mode": "dry-run",
-  "proposal": {
-    "arguments": {"ports": "22,80,443,3389"},
-    "rationale": "Identify common administration and web services.",
-    "target": "192.0.2.10",
-    "tool": "nmap_service_scan"
-  }
-}
-```
-
-## Phase 2 agent execution
-
-Execution requires both explicit flags:
+Execute one validated Nmap action:
 
 ```bash
 shadowforge --scope scope.json --authorized agent \
-  "Identify common web and remote administration services" \
+  "Identify common web and administration services" \
   --target 192.0.2.10 \
   --execute
 ```
 
-The sequence is:
+## Phase 3 recon dry-run
 
-1. verify the target is in scope
-2. ask Qwen for one structured proposal
-3. strictly parse and validate the proposal
-4. verify the proposal target is still in scope
-5. execute only through the allowlisted harness
-6. write verified hash-chained evidence
-7. ask the critic model for advisory interpretation
+Dry-run asks for and validates only the first decision. It performs no network action and writes no execution evidence.
 
-If the critic is unavailable after execution, the evidenced tool result is preserved and returned with a separate `critique_error` field.
+```bash
+shadowforge --scope scope.json recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --max-steps 3
+```
+
+## Phase 3 recon execution
+
+Active multi-step reconnaissance requires both explicit flags:
+
+```bash
+shadowforge --scope scope.json --authorized recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --max-steps 3 \
+  --execute
+```
+
+`--max-steps` must be from 1 through 5. The budget is a hard upper bound. The planner may stop earlier with a completion decision.
+
+Each active step is independently scope-checked, executed through the allowlisted harness, and written to the verified hash-chained evidence store. A failed tool step is recorded and returned; it does not create a generic recovery shell path.
 
 ## Evidence
 
-Active execution writes to `artifacts/evidence.jsonl` by default.
+Active execution writes to `artifacts/evidence.jsonl` by default. Records include execution ID, timestamp, scope, tool, target, validated arguments, result, duration, ShadowForge version, prior-record hash, and current SHA-256 hash.
 
-Each record includes:
-
-- execution ID
-- timestamp
-- engagement scope name
-- tool
-- target
-- validated arguments
-- status
-- duration
-- ShadowForge version
-- result data
-- prior-record hash
-- current-record SHA-256 hash
-
-Before appending, ShadowForge verifies the full existing chain. A malformed, edited, or broken chain is rejected rather than silently extended.
-
-The chain is tamper-evident; it is not a substitute for signed logs, external evidence retention, or cross-process file locking.
+Before appending, ShadowForge verifies the full existing chain. A malformed, edited, or broken chain is rejected.
 
 ## Safety boundary
 
-Version 0.2.0 still intentionally excludes autonomous or model-selected exploit execution, password spraying, credential dumping, persistence, evasion, relay/coercion, arbitrary remote commands, automatic propagation, and generic shell execution.
+Version 0.3.0 intentionally does **not** add:
 
-Phase 2 is **not** a free-running autonomous penetration-testing agent. It is one bounded proposal per invocation, against an operator-selected target, for the single non-destructive tool currently permitted by the policy layer.
+- generic shell, PowerShell, or Python execution
+- model-selected targets
+- Nmap NSE/script selection
+- exploit execution
+- password spraying or credential attacks
+- credential dumping or secret retrieval
+- relay/coercion
+- persistence or evasion
+- arbitrary remote commands
+- automatic propagation
+- unrestricted HTTP paths, methods, or redirects
+- unbounded autonomous loops
 
-Future capabilities must add explicit typed schemas and policy checks; they must not obtain a bypass around `Harness.execute()`.
+Phase 3 is bounded reconnaissance orchestration, not a free-running autonomous penetration-testing agent.
 
 ## Common errors
 
-- `required primary model ... is not installed`: run `ollama pull qwen3.5:27b`.
-- `could not query Ollama model inventory`: make sure Ollama is installed and running.
-- `proposal must ...` or `tool is not permitted ...`: the model produced output rejected by the deterministic policy layer; no active action was started.
-- `proposal target must exactly match ...`: the model changed the operator target; the proposal was blocked.
-- `outside engagement scope`: do not bypass the check; correct scope only if written authorization covers the target.
-- `Refusing to execute`: add `--authorized` only after confirming written authorization.
-- `ports must ...`: use individual ports or ascending ranges from 1 through 65535.
-- Kali `externally-managed-environment`: activate `.venv`; do not use `sudo pip` or `--break-system-packages`.
+- `required primary model ... is not installed`: install `qwen3.5:27b` in Ollama.
+- `could not query Ollama model inventory`: make sure Ollama is running.
+- `tool is not permitted ...`: the deterministic policy rejected a model decision.
+- `decision target must exactly match ...`: the model attempted to change the target.
+- `HTTP metadata probe requires one IP address`: use a single authorized IP for HTTP probing, not a CIDR.
+- `max_steps must ...`: choose a value from 1 through 5.
+- `outside engagement scope`: correct the scope only if written authorization covers the target.
+- `Refusing to execute`: use `--authorized` only after confirming written authorization.
 
 ## Development
 
@@ -274,7 +244,7 @@ python -m pip check
 pip-audit -r requirements-ci.txt
 ```
 
-CI validates Windows, Ubuntu, and Kali, and CodeQL runs separately.
+CI validates Windows, Ubuntu, and Kali; CodeQL runs separately.
 
 Beginner guides:
 
@@ -282,6 +252,7 @@ Beginner guides:
 - `docs/LINUX_NOVICE_GUIDE.md`
 - `docs/KALI_NOVICE_GUIDE.md`
 
-Phase 2 design details:
+Architecture details:
 
 - `docs/PHASE2_ARCHITECTURE.md`
+- `docs/PHASE3_ARCHITECTURE.md`

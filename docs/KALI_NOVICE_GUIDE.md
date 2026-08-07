@@ -2,13 +2,9 @@
 
 This guide is specifically for Kali Linux. It assumes little command-line experience. Use ShadowForge only on systems and networks you have written permission to test.
 
-ShadowForge 0.2.0 adds a bounded Phase 2 agent mode. The agent can propose only one non-destructive Nmap service-discovery action for the exact target you provide. Dry-run is the default.
+ShadowForge 0.3.0 supports direct scans, Phase 2 single-action planning, and Phase 3 bounded multi-step reconnaissance.
 
-## 1. Open Terminal
-
-Open the **Terminal** application from the Kali menu.
-
-## 2. Refresh Kali's package list
+## 1. Open Terminal and refresh packages
 
 ```bash
 sudo apt update
@@ -16,7 +12,7 @@ sudo apt update
 
 A full Kali upgrade is not required just to install ShadowForge.
 
-## 3. Install required system packages
+## 2. Install required packages
 
 ```bash
 sudo apt install -y git nmap python3 python3-venv python3-pip ca-certificates
@@ -30,18 +26,16 @@ nmap --version
 python3 --version
 ```
 
-## 4. Clone ShadowForge
+## 3. Clone ShadowForge
 
 ```bash
 git clone https://github.com/rikterskale/ShadowForge.git
 cd ShadowForge
 ```
 
-If you are testing an unmerged Phase 2 pull request, switch to the branch named in that PR.
+## 4. Create a Kali-safe Python environment
 
-## 5. Create an isolated Python environment
-
-Kali uses Debian's externally-managed Python protections. Do **not** use `sudo pip install` and do not use `--break-system-packages` for ShadowForge.
+Do **not** use `sudo pip` and do not use `--break-system-packages`.
 
 ```bash
 python3 -m venv .venv
@@ -56,18 +50,11 @@ Verify:
 shadowforge --help
 ```
 
-## 6. Install Ollama and local models for Phase 2
+## 5. Install Ollama and local models
 
-Direct `scan` mode does not require an LLM. The `models` and `agent` commands do.
+Direct `scan` mode does not require Ollama. Model-assisted `agent` and `recon` modes do.
 
-After installing Ollama using its supported Linux installation method:
-
-```bash
-ollama --version
-ollama list
-```
-
-Required model:
+Required:
 
 ```bash
 ollama pull qwen3.5:27b
@@ -80,22 +67,16 @@ ollama pull gemma4:31b
 ollama pull devstral-small-2:24b
 ```
 
-Check ShadowForge routing:
+Check routing:
 
 ```bash
+ollama list
 shadowforge models
 ```
 
-Fallback behavior:
+Gemma and Devstral fall back to Qwen if missing. Qwen itself is required for model-assisted commands.
 
-```text
-Qwen missing      -> model operations stop
-Gemma missing     -> critic role uses Qwen
-Devstral missing  -> coding role uses Qwen
-Both missing      -> Qwen handles all three roles
-```
-
-## 7. Create an authorized scope file
+## 6. Create authorized scope
 
 ```bash
 nano scope.json
@@ -110,76 +91,80 @@ Example:
 }
 ```
 
-Replace the example networks with only authorized IPs/CIDRs.
+Use only targets covered by written authorization.
 
-Save in Nano with **Ctrl+O**, press **Enter**, then exit with **Ctrl+X**.
-
-## 8. Run a direct service-discovery scan
+## 7. Direct scan
 
 ```bash
 shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
 ```
 
-A successful run prints JSON and writes execution evidence.
-
-## 9. Use Phase 2 agent dry-run first
+## 8. Phase 2 agent dry-run
 
 ```bash
 shadowforge --scope scope.json agent \
-  "Identify common web and remote administration services" \
+  "Identify common web and administration services" \
   --target 192.0.2.10
 ```
 
-Dry-run:
+Dry-run validates one Qwen proposal and performs no network action.
 
-1. validates the target against `scope.json`
-2. asks Qwen for one JSON proposal
-3. validates the proposal in Python
-4. prints the proposal
-5. does **not** run Nmap
-6. does **not** create active execution evidence
-
-The proposal may contain only:
-
-```text
-tool = nmap_service_scan
-target = exactly your --target value
-arguments = ports only
-rationale = short text
-```
-
-If Qwen proposes another target, another tool, extra fields, Nmap scripts, or malformed ports, ShadowForge blocks it.
-
-## 10. Execute a validated agent proposal
-
-Only after confirming written authorization:
+Execute one validated Phase 2 action only after confirming written authorization:
 
 ```bash
 shadowforge --scope scope.json --authorized agent \
-  "Identify common web and remote administration services" \
+  "Identify common web and administration services" \
   --target 192.0.2.10 \
   --execute
 ```
 
-Both `--authorized` and `--execute` are required.
+## 9. Phase 3 recon dry-run
 
-Execution still goes through:
+Phase 3 adds a hard step budget from 1 through 5. Dry-run validates only the first decision and performs no active network action:
 
-```text
-scope check
- -> proposal validation
- -> Harness.execute()
- -> ToolRegistry allowlist
- -> Nmap adapter
- -> evidence
- -> advisory critic
+```bash
+shadowforge --scope scope.json recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --max-steps 3
 ```
 
-The critic cannot launch another action.
+Allowed Phase 3 tools are only:
 
-If the critic fails after the active scan has already completed, ShadowForge preserves the scan result and reports `critique_error` separately.
+- `nmap_service_scan` with a validated `ports` expression
+- `http_metadata_probe` with exactly `scheme` and integer `port`
 
-## 11. Inspect evidence
+The HTTP probe requires one IP address, sends one `HEAD /`, follows no redirects, and intentionally does not record cookies or authorization headers.
+
+## 10. Execute Phase 3 recon
+
+Only after confirming written authorization:
+
+```bash
+shadowforge --scope scope.json --authorized recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --max-steps 3 \
+  --execute
+```
+
+Every active step passes through:
+
+```text
+planner decision
+ -> deterministic policy validation
+ -> exact-target check
+ -> scope validation
+ -> Harness.execute()
+ -> allowlisted adapter
+ -> evidence
+ -> result returned as untrusted data
+ -> next bounded decision or completion
+```
+
+The model cannot exceed the hard step budget or gain a generic shell/command path from tool output.
+
+## 11. Evidence
 
 Evidence is written to:
 
@@ -193,13 +178,11 @@ View it with:
 cat artifacts/evidence.jsonl
 ```
 
-Before appending a new record, ShadowForge verifies every existing record hash and every previous-hash link.
+ShadowForge verifies the full existing SHA-256 hash chain before appending. Each active Phase 3 step creates its own evidence record.
 
 ## 12. Common Kali problems
 
 ### `externally-managed-environment`
-
-Create and activate the virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -219,60 +202,51 @@ sudo apt install -y python3-venv
 ### `nmap: command not found`
 
 ```bash
-sudo apt update
 sudo apt install -y nmap
 ```
 
-### `could not query Ollama model inventory`
+### Ollama errors
 
 ```bash
 ollama --version
 ollama list
 ```
 
-Make sure Ollama is running.
-
-### `required primary model ... is not installed`
+If Qwen is missing:
 
 ```bash
 ollama pull qwen3.5:27b
 ```
 
-### `proposal must contain exactly ...`
-
-The planner produced data outside the Phase 2 schema. ShadowForge blocked it before network activity.
-
 ### `tool is not permitted ...`
 
-The planner attempted to select an unsupported tool. ShadowForge blocked it.
+The deterministic policy blocked a model-selected capability that Phase 3 does not allow.
 
-### `proposal target must exactly match ...`
+### `decision target must exactly match ...`
 
-The planner changed the operator target. ShadowForge blocked it.
+The planner attempted to change your target. ShadowForge blocked it.
+
+### `HTTP metadata probe requires one IP address`
+
+Use one authorized IP for HTTP probing, not a CIDR range.
+
+### `max_steps must ...`
+
+Choose a value from 1 through 5.
 
 ### `outside engagement scope`
 
-Do not bypass the check. Correct the scope only when written authorization covers the target.
+Do not bypass the check. Correct scope only when your written authorization covers the target.
 
 ### `Refusing to execute`
 
-Active agent mode requires both `--authorized` and `--execute`.
-
-### `ports must ...`
-
-Use valid ports from 1 through 65535, for example:
-
-```text
-22,80,443,8000-8100
-```
+Active model-assisted modes require `--authorized --execute`.
 
 ### `critique_error`
 
-The active scan completed and was evidenced, but the advisory critic model failed. Review the returned result and evidence.
+The active steps completed and were evidenced; only the advisory critic failed.
 
 ### `File/system error`
-
-Check paths and permissions:
 
 ```bash
 ls -l scope.json
@@ -281,11 +255,7 @@ ls -ld . artifacts 2>/dev/null
 
 Avoid running ShadowForge with `sudo`; fix ownership or permissions instead.
 
-## 13. Phase 2 limitation
-
-Phase 2 is not a free-running autonomous penetration-testing agent. It performs one bounded proposal per invocation and does not expose a generic shell, Python executor, Nmap NSE selector, or arbitrary-command interface to the model.
-
-## 14. Update ShadowForge
+## 13. Update ShadowForge
 
 ```bash
 git status
@@ -294,15 +264,15 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-## 15. Leave the virtual environment
+## 14. Leave the environment
 
 ```bash
 deactivate
 ```
 
-## 16. Remove ShadowForge
+## 15. Remove ShadowForge
 
-Only after confirming you are deleting the correct folder:
+Only after confirming the folder is correct:
 
 ```bash
 cd ..

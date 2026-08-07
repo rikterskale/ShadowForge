@@ -2,9 +2,9 @@
 
 Use ShadowForge only on systems and networks you have written permission to test. This guide is for Debian/Ubuntu-style Linux systems.
 
-> **Kali Linux users:** use `docs/KALI_NOVICE_GUIDE.md`. Kali is validated separately and has additional system-Python protections.
+> **Kali Linux users:** use `docs/KALI_NOVICE_GUIDE.md`.
 
-ShadowForge 0.2.0 supports direct scans and a bounded Phase 2 agent mode. Agent mode is a dry-run unless you explicitly request execution.
+ShadowForge 0.3.0 supports direct scans, Phase 2 single-action planning, and Phase 3 bounded multi-step reconnaissance.
 
 ## 1. Install prerequisites
 
@@ -13,25 +13,20 @@ sudo apt update
 sudo apt install -y git nmap python3 python3-venv python3-pip
 ```
 
-Install Ollama if you want model or agent features.
+Install Ollama if you want `models`, `agent`, or `recon` features.
 
-## 2. Clone ShadowForge
+## 2. Clone and install
 
 ```bash
 git clone https://github.com/rikterskale/ShadowForge.git
 cd ShadowForge
-```
-
-## 3. Create a virtual environment
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-## 4. Verify installation
+Verify:
 
 ```bash
 python --version
@@ -39,29 +34,29 @@ nmap --version
 shadowforge --help
 ```
 
-## 5. Install local models
+## 3. Install local models
 
-Required for model features:
+Required:
 
 ```bash
 ollama pull qwen3.5:27b
 ```
 
-Optional:
+Optional specialists:
 
 ```bash
 ollama pull gemma4:31b
 ollama pull devstral-small-2:24b
 ```
 
-Verify:
+Check routing:
 
 ```bash
 ollama list
 shadowforge models
 ```
 
-## 6. Create an authorized scope
+## 4. Create authorized scope
 
 Create `scope.json`:
 
@@ -72,66 +67,64 @@ Create `scope.json`:
 }
 ```
 
-Use only IP addresses or CIDR ranges covered by written authorization.
+Use only targets covered by written authorization.
 
-## 7. Run a direct scan
+## 5. Direct scan
 
 ```bash
 shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
 ```
 
-## 8. Phase 2 agent dry-run
+## 6. Phase 2 single-action agent
 
-Dry-run is the default:
+Dry-run:
 
 ```bash
 shadowforge --scope scope.json agent \
-  "Identify common web and remote administration services" \
+  "Identify common web and administration services" \
   --target 192.0.2.10
 ```
 
-Dry-run checks scope, asks Qwen for one structured proposal, validates it, and prints it. It does **not** run Nmap.
-
-Qwen can only propose:
-
-```text
-tool: nmap_service_scan
-target: exactly the target you supplied
-arguments: ports only
-rationale: short explanation
-```
-
-Any extra tool, different target, extra arguments, Nmap script syntax, malformed ports, or invalid JSON is rejected before network activity.
-
-## 9. Phase 2 agent execution
-
-After confirming written authorization:
+Execute only after confirming written authorization:
 
 ```bash
 shadowforge --scope scope.json --authorized agent \
-  "Identify common web and remote administration services" \
+  "Identify common web and administration services" \
   --target 192.0.2.10 \
   --execute
 ```
 
-Both `--authorized` and `--execute` are required.
+## 7. Phase 3 recon dry-run
 
-Execution flow:
+Phase 3 uses a code-enforced step budget from 1 through 5. Dry-run validates only the first decision and performs no active network action:
 
-```text
-objective
- -> Qwen proposal
- -> deterministic policy validation
- -> scope validation
- -> Harness.execute()
- -> allowlisted Nmap adapter
- -> evidence
- -> advisory critic
+```bash
+shadowforge --scope scope.json recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --max-steps 3
 ```
 
-The critic cannot launch follow-on actions. If it fails after the scan, the scan result remains available and ShadowForge reports `critique_error` separately.
+Allowed Phase 3 tools are only:
 
-## 10. Evidence
+- `nmap_service_scan` with `ports`
+- `http_metadata_probe` with exactly `scheme` and integer `port`
+
+The HTTP probe requires one IP address, sends one `HEAD /`, follows no redirects, and does not collect cookies.
+
+## 8. Execute Phase 3 recon
+
+```bash
+shadowforge --scope scope.json --authorized recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --max-steps 3 \
+  --execute
+```
+
+Each active step is scope-checked and executed through `Harness.execute()`. Results are written to evidence and then supplied back to the planner only as untrusted data. The model cannot change the target or exceed the hard step budget.
+
+## 9. Evidence
 
 Active execution writes:
 
@@ -139,26 +132,31 @@ Active execution writes:
 artifacts/evidence.jsonl
 ```
 
-ShadowForge verifies the full existing SHA-256 hash chain before appending a new record.
+ShadowForge verifies the full existing SHA-256 hash chain before appending. Each active Phase 3 step gets its own record.
 
 ## Troubleshooting
 
-- `python3: command not found`: install the prerequisite packages again and inspect package errors.
+- `python3: command not found`: reinstall prerequisite packages.
 - `nmap: command not found`: run `sudo apt install -y nmap`.
 - `ollama: command not found`: install Ollama and reopen the terminal.
 - `could not query Ollama model inventory`: make sure Ollama is running.
 - `required primary model ... is not installed`: run `ollama pull qwen3.5:27b`.
-- `proposal must contain exactly ...`: the model response failed the fixed schema; no scan started.
-- `tool is not permitted ...`: the model proposed an unsupported tool; no scan started.
-- `proposal target must exactly match ...`: the model changed the operator target; no scan started.
+- `tool is not permitted ...`: deterministic policy blocked the model decision.
+- `decision target must exactly match ...`: the model attempted to change the operator target.
+- `HTTP metadata probe requires one IP address`: use one authorized IP, not a CIDR, for HTTP probing.
+- `max_steps must ...`: choose a value from 1 through 5.
 - `outside engagement scope`: do not bypass the check.
 - `Refusing to execute`: use `--authorized --execute` only after confirming written authorization.
-- `ports must ...`: use valid individual ports or ascending ranges from 1 through 65535.
-- `critique_error`: the active scan completed but the advisory critic failed.
+- `critique_error`: the active steps completed and were evidenced; only the advisory critic failed.
 
-## Phase 2 limitation
+## Update
 
-Phase 2 performs one bounded proposal per command. It is not a free-running autonomous penetration-testing agent and does not expose a generic shell or arbitrary-command tool to the model.
+```bash
+git status
+git pull
+source .venv/bin/activate
+python -m pip install -e .
+```
 
 ## Cleanup
 
