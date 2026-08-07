@@ -6,6 +6,7 @@ import pytest
 from shadowforge.agent import ActionProposal, AgentCoordinator, ProposalError
 from shadowforge.evidence import EvidenceStore
 from shadowforge.harness import Harness
+from shadowforge.models import ModelError
 from shadowforge.scope import EngagementScope, ScopeError
 from shadowforge.tools.base import ToolRegistry, ToolResult
 
@@ -17,6 +18,8 @@ class Provider:
 
     def complete(self, system_prompt, user_prompt):
         self.calls.append((system_prompt, user_prompt))
+        if isinstance(self.response, Exception):
+            raise self.response
         return self.response
 
 
@@ -36,12 +39,12 @@ class FakeTool:
         return ToolResult("ok", {"target": target, "ports": arguments["ports"]})
 
 
-def coordinator(tmp_path, response):
+def coordinator(tmp_path, response, critic=None):
     scope = EngagementScope("lab", (ipaddress.ip_network("192.0.2.0/24"),))
     registry = ToolRegistry()
     registry.register(FakeTool())
     harness = Harness(scope, registry, EvidenceStore(tmp_path / "evidence.jsonl"))
-    return AgentCoordinator(scope, harness, Router(Provider(response)))
+    return AgentCoordinator(scope, harness, Router(Provider(response), critic))
 
 
 def proposal_json(**updates):
@@ -87,6 +90,7 @@ def test_agent_dry_run_plans_without_tool_execution(tmp_path):
     run = agent.run(objective="Find web and remote administration services", target="192.0.2.10")
     assert run.result is None
     assert run.critique is None
+    assert run.critique_error is None
     assert not (tmp_path / "evidence.jsonl").exists()
 
 
@@ -99,6 +103,20 @@ def test_agent_execute_uses_harness_and_critic(tmp_path):
     )
     assert run.result.status == "ok"
     assert run.critique == "reviewed"
+    assert run.critique_error is None
+    assert (tmp_path / "evidence.jsonl").exists()
+
+
+def test_critic_failure_does_not_hide_evidenced_execution(tmp_path):
+    agent = coordinator(tmp_path, proposal_json(), Provider(ModelError("critic offline")))
+    run = agent.run(
+        objective="Find common services",
+        target="192.0.2.10",
+        execute=True,
+    )
+    assert run.result.status == "ok"
+    assert run.critique is None
+    assert run.critique_error == "critic offline"
     assert (tmp_path / "evidence.jsonl").exists()
 
 
