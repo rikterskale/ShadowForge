@@ -17,6 +17,8 @@ ShadowForge is for authorized security testing. Preserve scope enforcement, expl
 - Keep statement and branch coverage at or above 99%.
 - Pin third-party GitHub Actions to immutable commit SHAs.
 - Keep direct CI tooling versions pinned in `requirements-ci.txt`.
+- Preserve first-class Windows, Ubuntu/Linux, and Kali Linux support.
+- Kali installation must use a virtual environment; do not instruct users to use `sudo pip` or `--break-system-packages`.
 
 ## Required validation before merge
 Run or confirm CI equivalents of:
@@ -31,7 +33,7 @@ python -m pip check
 pip-audit -r requirements-ci.txt
 ```
 
-CI must also validate supported Windows and Linux environments, and CodeQL must pass.
+CI must validate supported Windows and Ubuntu environments, validate the project in an official Kali rolling container, and pass CodeQL.
 
 ## Documentation rules
 Update docs whenever installation, CLI arguments, model behavior, configuration, environment variables, expected output, supported systems, examples, troubleshooting, security assumptions, evidence format, or limitations change.
@@ -39,5 +41,6 @@ Update docs whenever installation, CLI arguments, model behavior, configuration,
 Maintain these beginner-facing files:
 - `docs/WINDOWS_NOVICE_GUIDE.md`
 - `docs/LINUX_NOVICE_GUIDE.md`
+- `docs/KALI_NOVICE_GUIDE.md`
 
 Each guide should include prerequisites, exact installation steps, commands, expected successful output, common errors and fixes, model fallback behavior when applicable, evidence location, and cleanup/uninstall steps when relevant.
