@@ -11,8 +11,10 @@ from shadowforge.evidence import EvidenceError, EvidenceStore
 from shadowforge.harness import Harness
 from shadowforge.model_router import ModelRouter
 from shadowforge.models import ModelError
+from shadowforge.recon import ReconCoordinator, ReconDecisionError
 from shadowforge.scope import EngagementScope, ScopeError
 from shadowforge.tools.base import ToolRegistry
+from shadowforge.tools.http import HttpMetadataTool
 from shadowforge.tools.nmap import NmapTool
 
 
@@ -46,6 +48,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Execute the validated proposal; otherwise print a dry-run proposal only",
     )
+
+    recon = sub.add_parser(
+        "recon",
+        help="Run bounded multi-step non-destructive reconnaissance planning",
+    )
+    recon.add_argument("objective", help="What you want to learn from the authorized target")
+    recon.add_argument("--target", required=True, help="Exact operator-supplied IP or CIDR target")
+    recon.add_argument(
+        "--max-steps",
+        type=int,
+        default=3,
+        help="Maximum planner/execution steps, from 1 through 5 (default: 3)",
+    )
+    recon.add_argument(
+        "--execute",
+        action="store_true",
+        help="Execute validated steps; otherwise print only the first dry-run decision",
+    )
     return parser
 
 
@@ -71,6 +91,7 @@ def _build_harness(args: argparse.Namespace) -> tuple[EngagementScope, Harness]:
     scope = EngagementScope.from_file(Path(args.scope))
     registry = ToolRegistry()
     registry.register(NmapTool())
+    registry.register(HttpMetadataTool())
     harness = Harness(scope=scope, registry=registry, evidence=EvidenceStore(args.evidence))
     return scope, harness
 
@@ -111,12 +132,60 @@ def _run_agent(args: argparse.Namespace) -> int:
     return 0 if run.result is None or run.result.status == "ok" else 1
 
 
+def _run_recon(args: argparse.Namespace) -> int:
+    if not args.scope:
+        print("Refusing to run: recon mode requires --scope with an authorized scope file.")
+        return 2
+    if args.execute and not args.authorized:
+        print("Refusing to execute: pass --authorized only when you have written authorization.")
+        return 2
+    try:
+        scope, harness = _build_harness(args)
+        coordinator = ReconCoordinator(scope=scope, harness=harness, router=ModelRouter())
+        run = coordinator.run(
+            objective=args.objective,
+            target=args.target,
+            execute=args.execute,
+            max_steps=args.max_steps,
+        )
+    except (
+        ScopeError,
+        ReconDecisionError,
+        ValueError,
+        KeyError,
+        EvidenceError,
+        ModelError,
+    ) as exc:
+        print(f"Error: {exc}")
+        return 2
+    except OSError as exc:
+        print(f"File/system error: {exc}")
+        return 2
+
+    payload: dict[str, object] = {
+        "mode": "execute" if args.execute else "dry-run",
+        "steps": [step.as_dict() for step in run.steps],
+        "budget_exhausted": run.budget_exhausted,
+    }
+    if run.summary is not None:
+        payload["summary"] = run.summary
+    if run.critique is not None:
+        payload["critique"] = run.critique
+    if run.critique_error is not None:
+        payload["critique_error"] = run.critique_error
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    failed = any(step.result is not None and step.result.status != "ok" for step in run.steps)
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "models":
         return _print_model_status(ModelRouter())
     if args.command == "agent":
         return _run_agent(args)
+    if args.command == "recon":
+        return _run_recon(args)
     if not args.scope:
         print("Refusing to run: active tools require --scope with an authorized scope file.")
         return 2
