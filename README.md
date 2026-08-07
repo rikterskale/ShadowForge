@@ -14,7 +14,7 @@ ShadowForge Phase 1 is continuously validated on:
 - Python 3.11 and 3.14 on the Ubuntu/Windows matrix
 - Kali's repository-provided Python inside the official `kalilinux/kali-rolling` container
 
-Kali has its own beginner guide because Kali/Debian system Python is externally managed and ShadowForge should be installed in a virtual environment rather than with `sudo pip` or `--break-system-packages`.
+Kali has its own beginner guide because Kali/Debian system Python is externally managed and ShadowForge should be installed in a virtual environment rather than with `sudo pip` or `--break-system-packages`. The Kali CI image deliberately follows the moving `kali-rolling` tag so CI detects compatibility changes in Kali as they occur; it is a compatibility canary rather than a reproducible frozen image.
 
 ## LLM stack
 
