@@ -48,6 +48,9 @@ class OpenAICompatibleProvider:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
                 payload = json.load(response)
-            return str(payload["choices"][0]["message"]["content"])
+            content = payload["choices"][0]["message"]["content"]
+            if not isinstance(content, str):
+                raise TypeError("response message content is not a string")
+            return content
         except (OSError, KeyError, IndexError, TypeError, ValueError) as exc:
             raise ModelError(f"model request failed: {exc}") from exc
