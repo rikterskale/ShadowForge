@@ -45,18 +45,13 @@ jobs:
             if pip-audit -r requirements-ci.txt; then
               exit 0
             fi
-            status=$?
-            if [ "$status" -eq 1 ]; then
-              echo "pip-audit reported a vulnerability; not retrying."
-              exit 1
-            fi
             if [ "$attempt" -lt 3 ]; then
-              echo "pip-audit infrastructure failure on attempt $attempt; retrying."
+              echo "pip-audit failed on attempt $attempt; retrying in case of a transient service error."
               sleep 5
             fi
           done
-          echo "pip-audit failed after 3 infrastructure attempts."
-          exit 2
+          echo "pip-audit did not pass after 3 attempts."
+          exit 1
 
   kali:
     name: Kali rolling
