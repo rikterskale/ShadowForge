@@ -20,7 +20,10 @@ def validate_ports(value: str) -> str:
             raise ValueError("ports must not contain empty entries")
         pieces = item.split("-")
         if len(pieces) not in {1, 2} or any(not piece.isdigit() for piece in pieces):
-            raise ValueError("ports must contain only individual ports or ranges such as 80,443,8000-8100")
+            raise ValueError(
+                "ports must contain only individual ports or ranges such as "
+                "80,443,8000-8100"
+            )
         numbers = [int(piece) for piece in pieces]
         if any(number < 1 or number > 65535 for number in numbers):
             raise ValueError("ports must be between 1 and 65535")
