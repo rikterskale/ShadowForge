@@ -4,6 +4,7 @@ from unittest.mock import patch
 from shadowforge.cli import main
 from shadowforge.models import ModelError
 from shadowforge.recon import ReconAction, ReconDecisionError, ReconRun, ReconStep
+from shadowforge.state import StateError
 from shadowforge.tools.base import ToolResult
 
 
@@ -13,7 +14,7 @@ def scope_file(tmp_path):
     return path
 
 
-def run_result(*, executed=False, failed=False, critic_error=None):
+def run_result(*, executed=False, failed=False, critic_error=None, session_id=None, prior=0):
     action = ReconAction(
         "nmap_service_scan",
         "192.0.2.10",
@@ -28,6 +29,8 @@ def run_result(*, executed=False, failed=False, critic_error=None):
         critique=None if critic_error else ("Reviewed" if executed else None),
         critique_error=critic_error,
         budget_exhausted=executed,
+        session_id=session_id,
+        prior_observation_count=prior,
     )
 
 
@@ -70,6 +73,31 @@ def test_recon_dry_run_prints_first_step(tmp_path, capsys):
     assert code == 0
     assert '"mode": "dry-run"' in output
     assert '"nmap_service_scan"' in output
+    assert '"prior_observation_count": 0' in output
+
+
+def test_recon_session_options_and_output(tmp_path, capsys):
+    run = run_result(session_id="case-01", prior=4)
+    with patch("shadowforge.cli.ReconCoordinator.run", return_value=run) as mocked:
+        code = main(
+            [
+                "--scope",
+                str(scope_file(tmp_path)),
+                "recon",
+                "Find services",
+                "--target",
+                "192.0.2.10",
+                "--session",
+                "case-01",
+                "--state-dir",
+                str(tmp_path / "state"),
+            ]
+        )
+    output = capsys.readouterr().out
+    assert code == 0
+    assert '"session": "case-01"' in output
+    assert '"prior_observation_count": 4' in output
+    mocked.assert_called_once()
 
 
 def test_recon_execute_prints_summary_critique_and_budget(tmp_path, capsys):
@@ -132,7 +160,7 @@ def test_recon_returns_one_when_any_step_fails(tmp_path):
     assert code == 1
 
 
-def test_recon_reports_policy_model_and_file_errors(tmp_path, capsys):
+def test_recon_reports_policy_model_state_and_file_errors(tmp_path, capsys):
     base = [
         "--scope",
         str(scope_file(tmp_path)),
@@ -151,6 +179,10 @@ def test_recon_reports_policy_model_and_file_errors(tmp_path, capsys):
     with patch("shadowforge.cli.ReconCoordinator.run", side_effect=ModelError("offline")):
         assert main(base) == 2
     assert "offline" in capsys.readouterr().out
+
+    with patch("shadowforge.cli.ReconCoordinator.run", side_effect=StateError("bad state")):
+        assert main(base) == 2
+    assert "bad state" in capsys.readouterr().out
 
     with patch("shadowforge.cli.ReconCoordinator.run", side_effect=OSError("disk error")):
         assert main(base) == 2

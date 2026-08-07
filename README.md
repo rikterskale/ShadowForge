@@ -1,10 +1,6 @@
 # ShadowForge
 
-ShadowForge is a scope-enforced LLM-assisted harness for **authorized penetration testing and security assessment**. Version 0.3.0 adds bounded multi-step reconnaissance while preserving the existing scope, allowlist, evidence, and operator-approval boundaries.
-
-## Phase 3 in one sentence
-
-The operator supplies the exact target and objective; Qwen may make up to five deterministic-policy-validated reconnaissance decisions using only non-destructive service discovery and root HTTP metadata probing, while every active step still passes through `Harness.execute()` and the engagement scope.
+ShadowForge is a scope-enforced LLM-assisted harness for **authorized penetration testing and security assessment**. Version 0.4.0 adds optional persistent engagement state for resumable bounded reconnaissance while preserving the scope, allowlist, evidence, operator-approval, and hard step-budget boundaries.
 
 ## Supported platforms
 
@@ -24,38 +20,26 @@ ShadowForge mirrors the ADAtlas Ollama roles:
 - **Optional critic — `gemma4:31b`**: advisory post-run review; falls back to Qwen.
 - **Optional coding — `devstral-small-2:24b`**: coding/tooling role; falls back to Qwen.
 
-Install the required model:
-
 ```bash
 ollama pull qwen3.5:27b
-```
-
-Optional specialists:
-
-```bash
-ollama pull gemma4:31b
-ollama pull devstral-small-2:24b
-```
-
-Check routing:
-
-```bash
-ollama list
+ollama pull gemma4:31b       # optional
+ollama pull devstral-small-2:24b  # optional
 shadowforge models
 ```
 
-## Architecture
+## Current architecture
 
 ```text
 Operator objective + exact target
               |
+              +---- optional persistent session
+              |        validated + target-bound
+              |        treated as untrusted data
               v
         Qwen recon planner
               |
-              v
-    one structured decision
+       structured decision
               |
-              v
  deterministic schema/policy
        |                |
        |                +-- http_metadata_probe
@@ -66,69 +50,29 @@ Operator objective + exact target
               |
        EngagementScope
               |
-      step budget: 1..5
+      hard step budget: 1..5
               |
       dry-run by default
               |
      --execute + --authorized
               |
-              v
         Harness.execute()
               |
        ToolRegistry allowlist
               |
-       verified evidence
+       hash-chained evidence
               |
-   result returned as untrusted data
+     sanitized session observation
               |
-        next bounded decision
+        atomic state save
               |
-      Gemma/Qwen critic
+   next bounded decision / completion
+              |
+       Gemma/Qwen critic
        (no execution handle)
 ```
 
-Tool output is explicitly labeled as **untrusted data** when fed back to the planner. Instructions found in banners, headers, or other target-controlled output do not gain execution authority. Every new model decision must independently pass the deterministic parser and policy.
-
-## Allowed Phase 3 capabilities
-
-### `nmap_service_scan`
-
-The planner may choose only a validated `ports` expression. Nmap still runs through the existing constrained adapter.
-
-```json
-{
-  "decision": "action",
-  "tool": "nmap_service_scan",
-  "target": "192.0.2.10",
-  "arguments": {"ports": "22,80,443"},
-  "rationale": "Identify common exposed services."
-}
-```
-
-### `http_metadata_probe`
-
-The HTTP adapter requires a single IP address and accepts only `scheme` and `port`. It sends exactly one `HEAD /` request, does not follow redirects, and stores only an allowlisted subset of response headers. Cookies are not collected.
-
-```json
-{
-  "decision": "action",
-  "tool": "http_metadata_probe",
-  "target": "192.0.2.10",
-  "arguments": {"scheme": "https", "port": 443},
-  "rationale": "Collect root HTTPS metadata."
-}
-```
-
-### Completion
-
-The planner can stop before the step budget is exhausted:
-
-```json
-{
-  "decision": "complete",
-  "summary": "The bounded reconnaissance objective is satisfied."
-}
-```
+Tool output and persistent session state are explicitly treated as **untrusted data** when provided to a model. They never become execution authority. Every model decision must independently pass deterministic parsing, exact-target validation, scope checks, per-tool argument policy, and the hard step budget.
 
 ## Scope file
 
@@ -141,9 +85,7 @@ Create `scope.json` using only targets covered by written authorization:
 }
 ```
 
-The model cannot select or expand targets. Every action target must exactly match the operator-supplied target and pass scope validation.
-
-## Direct service discovery
+## Direct scan
 
 ```bash
 shadowforge --scope scope.json --authorized scan 192.0.2.10 --ports 22,80,443
@@ -168,9 +110,9 @@ shadowforge --scope scope.json --authorized agent \
   --execute
 ```
 
-## Phase 3 recon dry-run
+## Phase 3 bounded recon
 
-Dry-run asks for and validates only the first decision. It performs no network action and writes no execution evidence.
+Dry-run plans only the first decision and performs no network activity:
 
 ```bash
 shadowforge --scope scope.json recon \
@@ -179,9 +121,7 @@ shadowforge --scope scope.json recon \
   --max-steps 3
 ```
 
-## Phase 3 recon execution
-
-Active multi-step reconnaissance requires both explicit flags:
+Active bounded recon:
 
 ```bash
 shadowforge --scope scope.json --authorized recon \
@@ -191,19 +131,81 @@ shadowforge --scope scope.json --authorized recon \
   --execute
 ```
 
-`--max-steps` must be from 1 through 5. The budget is a hard upper bound. The planner may stop earlier with a completion decision.
+`--max-steps` is restricted to 1 through 5. The planner may stop earlier.
 
-Each active step is independently scope-checked, executed through the allowlisted harness, and written to the verified hash-chained evidence store. A failed tool step is recorded and returned; it does not create a generic recovery shell path.
+## Phase 4 persistent recon sessions
 
-## Evidence
+Add `--session` to let a later invocation reuse sanitized observations from earlier active runs:
 
-Active execution writes to `artifacts/evidence.jsonl` by default. Records include execution ID, timestamp, scope, tool, target, validated arguments, result, duration, ShadowForge version, prior-record hash, and current SHA-256 hash.
+```bash
+shadowforge --scope scope.json --authorized recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --session assessment-01 \
+  --max-steps 3 \
+  --execute
+```
 
-Before appending, ShadowForge verifies the full existing chain. A malformed, edited, or broken chain is rejected.
+Run the same command later with the **same session ID, exact target, and exact objective** to resume from prior state.
+
+Session IDs are restricted to safe filename characters. A stored session cannot be rebound to another target or objective. State files default to:
+
+```text
+artifacts/state/<session>.json
+```
+
+Use another state directory when needed:
+
+```bash
+shadowforge --scope scope.json recon \
+  "Identify exposed services and collect safe web metadata" \
+  --target 192.0.2.10 \
+  --session assessment-01 \
+  --state-dir ./engagement-state
+```
+
+A dry-run may read an existing session but does **not** create or modify session state.
+
+### What state stores
+
+Persistent memory contains only sanitized results from the two currently allowlisted recon tools:
+
+- Nmap: bounded service records only, maximum 256 services per stored result.
+- HTTP metadata: scheme, port, status code, reason, filtered metadata headers, and bounded adapter errors.
+
+Cookies, authorization headers, arbitrary unknown fields, unknown tools, cross-target observations, invalid statuses, malformed step ordering, and incompatible state versions are rejected or removed before model use.
+
+Each session is capped at 100 observations. Session files use atomic replacement to avoid normal partial-write corruption. Phase 4 does not yet provide cross-process locking, so do not run multiple writers against the same session ID concurrently.
+
+## Allowed active capabilities
+
+### `nmap_service_scan`
+
+Only the validated `ports` expression is model-controlled. Nmap NSE scripts and arbitrary flags are not available.
+
+### `http_metadata_probe`
+
+Requires one IP address and accepts exactly `scheme` plus integer `port`. It sends one `HEAD /`, follows no redirects, and records only allowlisted metadata headers.
+
+## Evidence versus state
+
+Active execution writes tamper-evident evidence to:
+
+```text
+artifacts/evidence.jsonl
+```
+
+Persistent session memory is separate:
+
+```text
+artifacts/state/<session>.json
+```
+
+Evidence is the hash-chained execution record. Session state is resumable working context and is not a substitute for evidence.
 
 ## Safety boundary
 
-Version 0.3.0 intentionally does **not** add:
+Version 0.4.0 intentionally does **not** add:
 
 - generic shell, PowerShell, or Python execution
 - model-selected targets
@@ -212,22 +214,23 @@ Version 0.3.0 intentionally does **not** add:
 - password spraying or credential attacks
 - credential dumping or secret retrieval
 - relay/coercion
-- persistence or evasion
+- persistence installation or defense evasion
 - arbitrary remote commands
 - automatic propagation
 - unrestricted HTTP paths, methods, or redirects
 - unbounded autonomous loops
 
-Phase 3 is bounded reconnaissance orchestration, not a free-running autonomous penetration-testing agent.
-
 ## Common errors
 
 - `required primary model ... is not installed`: install `qwen3.5:27b` in Ollama.
 - `could not query Ollama model inventory`: make sure Ollama is running.
-- `tool is not permitted ...`: the deterministic policy rejected a model decision.
+- `tool is not permitted ...`: deterministic policy rejected a model decision.
 - `decision target must exactly match ...`: the model attempted to change the target.
-- `HTTP metadata probe requires one IP address`: use a single authorized IP for HTTP probing, not a CIDR.
+- `HTTP metadata probe requires one IP address`: use one authorized IP, not a CIDR, for HTTP probing.
 - `max_steps must ...`: choose a value from 1 through 5.
+- `session must ...`: use a safe 1-64 character session ID such as `assessment-01`.
+- `session ... is bound to target ...`: use the original target or a different session ID.
+- `session objective does not match ...`: reuse the exact original objective or create another session.
 - `outside engagement scope`: correct the scope only if written authorization covers the target.
 - `Refusing to execute`: use `--authorized` only after confirming written authorization.
 
@@ -256,3 +259,4 @@ Architecture details:
 
 - `docs/PHASE2_ARCHITECTURE.md`
 - `docs/PHASE3_ARCHITECTURE.md`
+- `docs/PHASE4_ARCHITECTURE.md`

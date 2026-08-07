@@ -38,7 +38,20 @@ jobs:
         run: python -m build
       - name: Audit CI dependencies
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-        run: pip-audit -r requirements-ci.txt
+        shell: bash
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if pip-audit -r requirements-ci.txt; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "pip-audit failed on attempt $attempt; retrying in case of a transient service error."
+              sleep 5
+            fi
+          done
+          echo "pip-audit did not pass after 3 attempts."
+          exit 1
 
   kali:
     name: Kali rolling
